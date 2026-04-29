@@ -2554,6 +2554,223 @@ describe("quote text objects", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bracket text objects — i( / a( / i[ / a[ / i{ / a{ aliases
+// ---------------------------------------------------------------------------
+
+describe("bracket text objects", () => {
+  it("supports representative change, delete, and yank bracket text objects", () => {
+    const scenarios = [
+      {
+        name: "ci(",
+        initial: "call(foo) now",
+        cursorCol: 6,
+        keys: ["c", "i", "("],
+        expectedText: "call() now",
+        expectedRegister: "foo",
+        expectedMode: "insert",
+        expectedCursor: { line: 0, col: 5 },
+      },
+      {
+        name: "da(",
+        initial: "call(foo) now",
+        cursorCol: 6,
+        keys: ["d", "a", "("],
+        expectedText: "call now",
+        expectedRegister: "(foo)",
+        expectedMode: "normal",
+        expectedCursor: { line: 0, col: 4 },
+      },
+      {
+        name: "yi[",
+        initial: "arr[foo] now",
+        cursorCol: 5,
+        keys: ["y", "i", "["],
+        expectedText: "arr[foo] now",
+        expectedRegister: "foo",
+        expectedMode: "normal",
+        expectedCursor: { line: 0, col: 5 },
+      },
+      {
+        name: "ya{",
+        initial: "obj {foo} now",
+        cursorCol: 7,
+        keys: ["y", "a", "{"],
+        expectedText: "obj {foo} now",
+        expectedRegister: "{foo}",
+        expectedMode: "normal",
+        expectedCursor: { line: 0, col: 7 },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy(scenario.initial);
+
+      setInternalCursor(editor, scenario.cursorCol);
+      sendKeys(editor, scenario.keys);
+
+      assert.equal(editor.getText(), scenario.expectedText, `${scenario.name} text`);
+      assert.equal(editor.getRegister(), scenario.expectedRegister, `${scenario.name} register`);
+      assert.equal(editor.getMode(), scenario.expectedMode, `${scenario.name} mode`);
+      assert.deepEqual(editor.getCursor(), scenario.expectedCursor, `${scenario.name} cursor`);
+    }
+  });
+
+  it("supports closing delimiter aliases and b/B aliases", () => {
+    const scenarios = [
+      {
+        name: ") alias",
+        initial: "call(foo)",
+        cursorCol: 6,
+        keys: ["d", "i", ")"],
+        expectedText: "call()",
+      },
+      {
+        name: "b alias",
+        initial: "call(foo)",
+        cursorCol: 6,
+        keys: ["d", "i", "b"],
+        expectedText: "call()",
+      },
+      {
+        name: "] alias",
+        initial: "arr[foo]",
+        cursorCol: 5,
+        keys: ["d", "i", "]"],
+        expectedText: "arr[]",
+      },
+      {
+        name: "} alias",
+        initial: "obj{foo}",
+        cursorCol: 5,
+        keys: ["d", "i", "}"],
+        expectedText: "obj{}",
+      },
+      {
+        name: "B alias",
+        initial: "obj{foo}",
+        cursorCol: 5,
+        keys: ["d", "i", "B"],
+        expectedText: "obj{}",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy(scenario.initial);
+
+      setInternalCursor(editor, scenario.cursorCol);
+      sendKeys(editor, scenario.keys);
+
+      assert.equal(editor.getText(), scenario.expectedText, `${scenario.name} text`);
+      assert.equal(editor.getRegister(), "foo", `${scenario.name} register`);
+    }
+  });
+
+  it("uses the smallest nested parenthesis pair", () => {
+    const { editor } = createEditorWithSpy("a(b(c)d)e");
+
+    setInternalCursor(editor, 4);
+    sendKeys(editor, ["d", "i", "("]);
+
+    assert.equal(editor.getText(), "a(b()d)e");
+    assert.equal(editor.getRegister(), "c");
+  });
+
+  it("yanks cross-line brace ranges", () => {
+    const initial = "fn {\n  x\n}\nend";
+    const { editor } = createMultiLineEditor(initial);
+
+    setInternalCursor(editor, 2, 1);
+    sendKeys(editor, ["y", "a", "{"]);
+
+    assert.equal(editor.getText(), initial);
+    assert.equal(editor.getRegister(), "{\n  x\n}");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 2 });
+  });
+
+  it("counts the cursor on either delimiter as inside", () => {
+    const scenarios = [
+      { name: "opening delimiter", cursorCol: 4 },
+      { name: "closing delimiter", cursorCol: 8 },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy("call(foo)");
+
+      setInternalCursor(editor, scenario.cursorCol);
+      sendKeys(editor, ["d", "i", "("]);
+
+      assert.equal(editor.getText(), "call()", `${scenario.name} text`);
+      assert.equal(editor.getRegister(), "foo", `${scenario.name} register`);
+    }
+  });
+
+  it("empty inner brackets no-op for delete and yank", () => {
+    const scenarios = [
+      { name: "delete", keys: ["d", "i", "("] },
+      { name: "yank", keys: ["y", "i", "("] },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy("call() now");
+      const beforeCursor = { line: 0, col: 4 };
+      editor.setRegister("seed");
+
+      setInternalCursor(editor, beforeCursor.col, beforeCursor.line);
+      sendKeys(editor, scenario.keys);
+
+      assert.equal(editor.getText(), "call() now", `${scenario.name} text`);
+      assert.equal(editor.getRegister(), "seed", `${scenario.name} register`);
+      assert.deepEqual(editor.getCursor(), beforeCursor, `${scenario.name} cursor`);
+      assert.equal(editor.getMode(), "normal", `${scenario.name} mode`);
+    }
+  });
+
+  it("empty inner bracket change enters insert at the inner start", () => {
+    const { editor } = createEditorWithSpy("call() now");
+    editor.setRegister("seed");
+
+    setInternalCursor(editor, 4);
+    sendKeys(editor, ["c", "i", "("]);
+
+    assert.equal(editor.getText(), "call() now");
+    assert.equal(editor.getRegister(), "seed");
+    assert.equal(editor.getMode(), "insert");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("counted bracket text objects cancel without mutation or register writes", () => {
+    const scenarios = [
+      {
+        name: "2ci(",
+        initial: "call(foo)",
+        cursorCol: 6,
+        keys: ["2", "c", "i", "("],
+      },
+      {
+        name: "y2a{",
+        initial: "obj{foo}",
+        cursorCol: 5,
+        keys: ["y", "2", "a", "{"],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { editor } = createEditorWithSpy(scenario.initial);
+      const beforeCursor = { line: 0, col: scenario.cursorCol };
+      editor.setRegister("seed");
+
+      setInternalCursor(editor, beforeCursor.col, beforeCursor.line);
+      sendKeys(editor, scenario.keys);
+
+      assert.equal(editor.getText(), scenario.initial, `${scenario.name} text`);
+      assert.equal(editor.getRegister(), "seed", `${scenario.name} register`);
+      assert.deepEqual(editor.getCursor(), beforeCursor, `${scenario.name} cursor`);
+      assert.equal(editor.getMode(), "normal", `${scenario.name} mode`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Single-key edit commands — x / s / S / D / C
 // ---------------------------------------------------------------------------
 

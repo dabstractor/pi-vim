@@ -76,6 +76,30 @@ export function normalizeDelimiterKey(key: string): DelimiterSpec | null {
     };
   }
 
+  if (key === "(" || key === ")" || key === "b") {
+    return {
+      type: "bracket",
+      open: "(",
+      close: ")",
+    };
+  }
+
+  if (key === "[" || key === "]") {
+    return {
+      type: "bracket",
+      open: "[",
+      close: "]",
+    };
+  }
+
+  if (key === "{" || key === "}" || key === "B") {
+    return {
+      type: "bracket",
+      open: "{",
+      close: "}",
+    };
+  }
+
   return null;
 }
 
@@ -138,6 +162,54 @@ export function resolveQuoteObjectRange(
   };
 }
 
+export function resolveBracketObjectRange(
+  text: string,
+  cursorAbs: number,
+  kind: TextObjectKind,
+  open: string,
+  close: string,
+): TextObjectRange | null {
+  if (open.length !== 1 || close.length !== 1 || open === close) return null;
+
+  const cursor = clampCursorAbs(text, cursorAbs);
+  const openStack: number[] = [];
+  let bestPair: { open: number; close: number } | null = null;
+
+  for (let index = 0; index < text.length; index++) {
+    const ch = text[index];
+
+    if (ch === open) {
+      openStack.push(index);
+      continue;
+    }
+
+    if (ch !== close) continue;
+
+    const openIndex = openStack.pop();
+    if (openIndex === undefined) continue;
+
+    if (openIndex <= cursor && cursor <= index) {
+      if (bestPair === null || index - openIndex < bestPair.close - bestPair.open) {
+        bestPair = { open: openIndex, close: index };
+      }
+    }
+  }
+
+  if (bestPair === null) return null;
+
+  if (kind === "i") {
+    return {
+      startAbs: bestPair.open + 1,
+      endAbs: bestPair.close,
+    };
+  }
+
+  return {
+    startAbs: bestPair.open,
+    endAbs: bestPair.close + 1,
+  };
+}
+
 export function resolveDelimitedTextObjectRange(
   text: string,
   cursorAbs: number,
@@ -149,6 +221,10 @@ export function resolveDelimitedTextObjectRange(
 
   if (spec.type === "quote") {
     return resolveQuoteObjectRange(text, cursorAbs, kind, spec.open);
+  }
+
+  if (spec.type === "bracket") {
+    return resolveBracketObjectRange(text, cursorAbs, kind, spec.open, spec.close);
   }
 
   return null;

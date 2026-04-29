@@ -87,6 +87,27 @@ describe("normalizeDelimiterKey", () => {
     });
   });
 
+  it("normalizes bracket delimiter aliases", () => {
+    const cases = [
+      { key: "(", open: "(", close: ")" },
+      { key: ")", open: "(", close: ")" },
+      { key: "b", open: "(", close: ")" },
+      { key: "[", open: "[", close: "]" },
+      { key: "]", open: "[", close: "]" },
+      { key: "{", open: "{", close: "}" },
+      { key: "}", open: "{", close: "}" },
+      { key: "B", open: "{", close: "}" },
+    ];
+
+    for (const bracketCase of cases) {
+      assert.deepEqual(normalizeDelimiterKey(bracketCase.key), {
+        type: "bracket",
+        open: bracketCase.open,
+        close: bracketCase.close,
+      }, bracketCase.key);
+    }
+  });
+
   it("returns null for unsupported delimiter keys", () => {
     assert.equal(normalizeDelimiterKey("x"), null);
     assert.equal(resolveDelimitedTextObjectRange("x", 0, "i", "x"), null);
@@ -189,5 +210,73 @@ describe("resolveQuoteObjectRange", () => {
       startAbs: 4,
       endAbs: 6,
     });
+  });
+});
+
+describe("resolveBracketObjectRange", () => {
+  it("resolves inside and around parentheses", () => {
+    const text = "call(foo) now";
+
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 6, "i", "("), {
+      startAbs: 5,
+      endAbs: 8,
+    });
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 6, "a", "("), {
+      startAbs: 4,
+      endAbs: 9,
+    });
+  });
+
+  it("chooses the smallest nested containing pair", () => {
+    const text = "a(b(c)d)e";
+
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 4, "a", "("), {
+      startAbs: 3,
+      endAbs: 6,
+    });
+  });
+
+  it("resolves cross-line brace ranges", () => {
+    const text = "fn {\n  x\n}";
+
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 7, "i", "{"), {
+      startAbs: 4,
+      endAbs: 9,
+    });
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 7, "a", "{"), {
+      startAbs: 3,
+      endAbs: 10,
+    });
+  });
+
+  it("counts the cursor on an opening or closing bracket as contained", () => {
+    const text = "x(foo)";
+
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 1, "i", "("), {
+      startAbs: 2,
+      endAbs: 5,
+    });
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 5, "i", "("), {
+      startAbs: 2,
+      endAbs: 5,
+    });
+  });
+
+  it("returns an empty inner range for empty brackets", () => {
+    const text = "fn()";
+
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 2, "i", "("), {
+      startAbs: 3,
+      endAbs: 3,
+    });
+    assert.deepEqual(resolveDelimitedTextObjectRange(text, 3, "a", ")"), {
+      startAbs: 2,
+      endAbs: 4,
+    });
+  });
+
+  it("returns null for unmatched brackets", () => {
+    assert.equal(resolveDelimitedTextObjectRange("call(foo", 5, "i", "("), null);
+    assert.equal(resolveDelimitedTextObjectRange("call(foo)", 5, "i", "["), null);
   });
 });
