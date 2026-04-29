@@ -2770,6 +2770,28 @@ describe("bracket text objects", () => {
   });
 });
 
+describe("delimited text objects at end of line", () => {
+  it("resolves bracket objects from $ on a non-final line", () => {
+    const { editor } = createMultiLineEditor("call(foo)\nbar");
+
+    sendKeys(editor, ["$", "d", "i", "("]);
+
+    assert.equal(editor.getText(), "call()\nbar");
+    assert.equal(editor.getRegister(), "foo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("resolves quote objects from $ on a non-final line", () => {
+    const { editor } = createMultiLineEditor("say \"hi\"\nnext");
+
+    sendKeys(editor, ["$", "d", "i", "\""]);
+
+    assert.equal(editor.getText(), "say \"\"\nnext");
+    assert.equal(editor.getRegister(), "hi");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+});
+
 describe("text object cancellation hardening", () => {
   it("unsupported object keys after di, ci, and yi cancel before the next normal key", () => {
     const scenarios = [

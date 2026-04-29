@@ -1332,7 +1332,7 @@ export class ModalEditor extends CustomEditor {
 
     const range = resolveDelimitedTextObjectRange(
       this.getText(),
-      this.getAbsoluteIndexFromCursor(),
+      this.getDelimitedTextObjectCursorAbs(),
       pendingTextObject,
       data,
     );
@@ -2132,6 +2132,18 @@ export class ModalEditor extends CustomEditor {
 
   private getAbsoluteIndexFromCursor(): number {
     const cursor = this.getCursor();
+    return this.getAbsoluteIndex(cursor.line, cursor.col);
+  }
+
+  private getDelimitedTextObjectCursorAbs(): number {
+    const lines = this.getLines();
+    const cursor = this.getCursor();
+    const line = lines[cursor.line] ?? "";
+
+    if (line.length > 0 && cursor.col >= line.length) {
+      return this.getAbsoluteIndex(cursor.line, line.length - 1);
+    }
+
     return this.getAbsoluteIndex(cursor.line, cursor.col);
   }
 

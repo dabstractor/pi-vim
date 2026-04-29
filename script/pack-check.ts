@@ -62,7 +62,7 @@ const FORBIDDEN_REGEX_BY_GLOB: Record<(typeof FORBIDDEN_GLOBS)[number], RegExp> 
 const THRESHOLDS = {
   maxFiles: 12,
   maxSize: 30000,
-  maxUnpackedSize: 130000,
+  maxUnpackedSize: 131000,
 } as const;
 
 function compareStrings(a: string, b: string): number {
