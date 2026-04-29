@@ -78,4 +78,17 @@ describe("piVim clipboard mirror settings reader", () => {
       null,
     );
   });
+
+  it("treats malformed project piVim settings as an override instead of falling back to global", () => {
+    const setting = readPiVimClipboardMirrorSetting(
+      { piVim: { clipboardMirror: "yank" } },
+      { piVim: "bad" },
+    );
+    const result = resolveClipboardMirrorPolicy(setting);
+
+    assert.equal(setting, "bad");
+    assert.equal(result.policy, "all");
+    assert.match(result.warning ?? "", /bad/);
+    assert.match(result.warning ?? "", /all, yank, never/);
+  });
 });

@@ -9,7 +9,9 @@ export type PiVimSettings = { clipboardMirror?: unknown };
 
 type UnknownRecord = Record<string, unknown>;
 
-function formatInvalidSettingValue(value: unknown) {
+const missing = Symbol();
+
+function formatInvalid(value: unknown) {
   const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   try {
     return `${JSON.stringify(value) ?? type} (type ${type})`;
@@ -18,10 +20,11 @@ function formatInvalidSettingValue(value: unknown) {
   }
 }
 
-function getPiVimSettings(settings: unknown): UnknownRecord {
-  if (typeof settings !== "object" || settings === null) return {};
-  const { piVim } = settings as UnknownRecord;
-  return typeof piVim === "object" && piVim !== null ? (piVim as UnknownRecord) : {};
+function readSetting(settings: unknown): unknown {
+  if (typeof settings !== "object" || settings === null || !Object.hasOwn(settings, "piVim")) return missing;
+  const piVim = (settings as UnknownRecord).piVim;
+  if (typeof piVim !== "object" || piVim === null || Array.isArray(piVim)) return piVim;
+  return Object.hasOwn(piVim, "clipboardMirror") ? (piVim as UnknownRecord).clipboardMirror : missing;
 }
 
 export function resolveClipboardMirrorPolicy(value: unknown) {
@@ -36,18 +39,15 @@ export function resolveClipboardMirrorPolicy(value: unknown) {
 
   return {
     policy: DEFAULT_CLIPBOARD_MIRROR_POLICY,
-    warning: `Invalid piVim.clipboardMirror value ${formatInvalidSettingValue(value)}; expected one of: all, yank, never. Falling back to all.`,
+    warning: `Invalid piVim.clipboardMirror ${formatInvalid(value)}; expected all, yank, never. Using all.`,
   };
 }
 
 export function readPiVimClipboardMirrorSetting(globalSettings: unknown, projectSettings: unknown): unknown | undefined {
-  const projectPiVim = getPiVimSettings(projectSettings);
-  if (Object.hasOwn(projectPiVim, "clipboardMirror")) return projectPiVim.clipboardMirror;
-
-  const globalPiVim = getPiVimSettings(globalSettings);
-  if (Object.hasOwn(globalPiVim, "clipboardMirror")) return globalPiVim.clipboardMirror;
-
-  return undefined;
+  const project = readSetting(projectSettings);
+  if (project !== missing) return project;
+  const global = readSetting(globalSettings);
+  return global === missing ? undefined : global;
 }
 
 function readPiVimSettingsFromDisk(cwd: string): PiVimSettings {
