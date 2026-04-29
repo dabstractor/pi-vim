@@ -10,6 +10,28 @@ pi install npm:pi-vim
 
 Restart Pi after install.
 
+## configure
+
+pi-vim reads persistent Pi settings from `~/.pi/agent/settings.json` and project `.pi/settings.json`.
+
+Clipboard write mirroring is controlled by `piVim.clipboardMirror`:
+
+```json
+{
+  "piVim": {
+    "clipboardMirror": "all"
+  }
+}
+```
+
+| value | behavior |
+|-------|----------|
+| `all` | Mirror every unnamed-register write (default/current behavior) |
+| `yank` | Mirror yanks only; deletes/changes update only pi-vim's internal register |
+| `never` | Never mirror register writes to the OS clipboard |
+
+The setting controls write mirroring only. `p` / `P` keep the paste policy documented below.
+
 ## contributor setup
 
 Hooks install with `npm install` after cloning. To wire them explicitly:
@@ -178,8 +200,7 @@ Char-find motions compose with operators: `df{char}`, `ct{char}`, `d{count}t{cha
 
 ### edit operators (normal mode)
 
-All operators write to the unnamed register and mirror to the system clipboard
-(best-effort; clipboard failure never breaks editing).
+Register-writing edits write to the unnamed register. With the default clipboard mirror policy, they also mirror to the system clipboard best-effort (clipboard failure never breaks editing).
 
 #### delete `d{motion}` / `dd`
 
@@ -314,9 +335,10 @@ Paste text ending in `\n` is treated as line-wise.
 
 ## register and clipboard policy
 
-- Unnamed register is OS-backed by default (roughly Vim's `clipboard=unnamed`).
-- `d` / `c` / `y` write a synchronous internal shadow, then mirror to the OS clipboard best-effort.
-- Rapid writes coalesce: only the latest pending value is guaranteed to be mirrored.
+- `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
+- `piVim.clipboardMirror = "yank"` mirrors yanks only; deletes and changes update only pi-vim's internal shadow.
+- `piVim.clipboardMirror = "never"` disables write mirroring while keeping internal register writes synchronous.
+- Rapid mirrored writes coalesce: only the latest pending value is guaranteed to be mirrored.
 - `p` / `P` read the OS clipboard first, falling back to the shadow on read failure/timeout.
 - While a mirror is in flight, `p` / `P` use the shadow so immediate yank/delete → put stays ordered.
 - Pi owns the terminal clipboard backends; on Wayland external state may lag while the shadow stays authoritative for immediate puts.
