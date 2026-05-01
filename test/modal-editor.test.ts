@@ -2662,6 +2662,163 @@ describe("matching pair motion", () => {
     assert.equal(editor.getRegister(), "seed");
     assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
   });
+
+  it("matching pair operator motion d% deletes forward inclusive range", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)baz");
+    setInternalCursor(editor, 3);
+
+    sendKeys(editor, ["d", "%"]);
+
+    assert.equal(editor.getText(), "foobaz");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
+
+  it("matching pair operator motion d% deletes backward inclusive range", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)baz");
+    setInternalCursor(editor, 7);
+
+    sendKeys(editor, ["d", "%"]);
+
+    assert.equal(editor.getText(), "foobaz");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
+
+  it("matching pair operator motion d% scan-forward anchors at original cursor", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("xx foo(bar) zz");
+    setInternalCursor(editor, 3);
+
+    sendKeys(editor, ["d", "%"]);
+
+    assert.equal(editor.getText(), "xx  zz");
+    assert.equal(editor.getRegister(), "foo(bar)");
+    assert.deepEqual(clipboardWrites, ["foo(bar)"]);
+  });
+
+  it("matching pair operator motion y% yanks forward without mutation", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)baz");
+    setInternalCursor(editor, 3);
+
+    sendKeys(editor, ["y", "%"]);
+
+    assert.equal(editor.getText(), "foo(bar)baz");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
+
+  it("matching pair operator motion y% yanks backward without mutation", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)baz");
+    setInternalCursor(editor, 7);
+
+    sendKeys(editor, ["y", "%"]);
+
+    assert.equal(editor.getText(), "foo(bar)baz");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
+
+  it("matching pair operator motion c% deletes range and enters insert mode", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)baz");
+    setInternalCursor(editor, 3);
+
+    sendKeys(editor, ["c", "%"]);
+
+    assert.equal(editor.getText(), "foobaz");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.equal(editor.getMode(), "insert");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
+
+  it("matching pair operator motion follows clipboard mirror yank policy", () => {
+    const deletion = createEditorWithSpy("foo(bar)baz");
+    deletion.editor.setClipboardMirrorPolicy("yank");
+    setInternalCursor(deletion.editor, 3);
+
+    sendKeys(deletion.editor, ["d", "%"]);
+
+    assert.equal(deletion.editor.getRegister(), "(bar)");
+    assert.deepEqual(deletion.clipboardWrites, []);
+
+    const yank = createEditorWithSpy("foo(bar)baz");
+    yank.editor.setClipboardMirrorPolicy("yank");
+    setInternalCursor(yank.editor, 3);
+
+    sendKeys(yank.editor, ["y", "%"]);
+
+    assert.equal(yank.editor.getRegister(), "(bar)");
+    assert.deepEqual(yank.clipboardWrites, ["(bar)"]);
+
+    const change = createEditorWithSpy("foo(bar)baz");
+    change.editor.setClipboardMirrorPolicy("yank");
+    setInternalCursor(change.editor, 3);
+
+    sendKeys(change.editor, ["c", "%"]);
+
+    assert.equal(change.editor.getRegister(), "(bar)");
+    assert.deepEqual(change.clipboardWrites, []);
+  });
+
+  it("matching pair operator motion no-target cancellation preserves text and register", () => {
+    for (const operator of ["d", "y", "c"] as const) {
+      const { editor, clipboardWrites } = createEditorWithSpy("foo(bar");
+      editor.setRegister("seed");
+      setInternalCursor(editor, 3);
+
+      sendKeys(editor, [operator, "%"]);
+
+      assert.equal(editor.getText(), "foo(bar");
+      assert.equal(editor.getRegister(), "seed");
+      assert.equal(editor.getMode(), "normal");
+      assert.deepEqual(clipboardWrites, []);
+
+      sendKeys(editor, ["x"]);
+
+      assert.equal(editor.getText(), "foobar");
+      assert.equal(editor.getRegister(), "(");
+      assert.deepEqual(clipboardWrites, ["("]);
+    }
+  });
+
+  it("matching pair operator motion counted forms cancel and clear stale state", () => {
+    const cases = [
+      ["d", "2", "%"],
+      ["2", "d", "%"],
+      ["y", "2", "%"],
+      ["2", "y", "%"],
+      ["c", "2", "%"],
+      ["2", "c", "%"],
+    ];
+
+    for (const keys of cases) {
+      const { editor, clipboardWrites } = createEditorWithSpy("foo(bar)");
+      editor.setRegister("seed");
+
+      sendKeys(editor, keys);
+
+      assert.equal(editor.getText(), "foo(bar)");
+      assert.equal(editor.getRegister(), "seed");
+      assert.equal(editor.getMode(), "normal");
+      assert.deepEqual(clipboardWrites, []);
+
+      sendKeys(editor, ["x"]);
+
+      assert.equal(editor.getText(), "oo(bar)");
+      assert.equal(editor.getRegister(), "f");
+      assert.deepEqual(clipboardWrites, ["f"]);
+    }
+  });
+
+  it("matching pair operator motion d% at visible EOL avoids the following newline", () => {
+    const { editor, clipboardWrites } = createMultiLineEditor("foo(bar)\nnext");
+    setInternalCursor(editor, 8);
+
+    sendKeys(editor, ["d", "%"]);
+
+    assert.equal(editor.getText(), "foo\nnext");
+    assert.equal(editor.getRegister(), "(bar)");
+    assert.deepEqual(clipboardWrites, ["(bar)"]);
+  });
 });
 
 describe("J — join lines", () => {

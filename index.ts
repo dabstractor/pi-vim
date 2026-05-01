@@ -1409,6 +1409,12 @@ export class ModalEditor extends CustomEditor {
     return this.prefixCount.length > 0 || this.operatorCount.length > 0;
   }
 
+  private opDigit(data: string): boolean {
+    if (!this.isDigit(data) || (data === "0" && !this.operatorCount)) return false;
+    this.operatorCount += data;
+    return true;
+  }
+
   private cancelPendingOperator(data: string): void {
     this.pendingOperator = null;
     this.prefixCount = "";
@@ -1527,16 +1533,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handlePendingDelete(data: string): void {
-    if (this.isDigit(data)) {
-      if (this.operatorCount.length === 0) {
-        if (data !== "0") {
-          this.operatorCount = data;
-          return;
-        }
-      } else {
-        this.operatorCount += data;
-        return;
-      }
+    if (this.opDigit(data)) return;
+
+    if (data === "%") {
+      this.applyPercentOp();
+      return;
     }
 
     if (data === "d") {
@@ -1579,8 +1580,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    const hasCount =
-      this.prefixCount.length > 0 || this.operatorCount.length > 0;
+    const hasCount = this.hasPendingCount();
     const supportsCountedWordMotion =
       data === "w" ||
       data === "e" ||
@@ -1610,16 +1610,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handlePendingChange(data: string): void {
-    if (this.isDigit(data)) {
-      if (this.operatorCount.length === 0) {
-        if (data !== "0") {
-          this.operatorCount = data;
-          return;
-        }
-      } else {
-        this.operatorCount += data;
-        return;
-      }
+    if (this.opDigit(data)) return;
+
+    if (data === "%") {
+      this.applyPercentOp();
+      return;
     }
 
     if (data === "c") {
@@ -1660,8 +1655,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    const hasCount =
-      this.prefixCount.length > 0 || this.operatorCount.length > 0;
+    const hasCount = this.hasPendingCount();
     const supportsCountedWordMotion =
       data === "w" ||
       data === "e" ||
@@ -2330,6 +2324,24 @@ export class ModalEditor extends CustomEditor {
     if (target) this.moveCursorToAbsoluteIndex(target.targetAbs);
   }
 
+  private applyPercentOp(): void {
+    const op = this.pendingOperator;
+    const counted = this.hasPendingCount();
+    this.clearPendingState();
+    if (!op || counted) return;
+
+    const t = this.getMatchingPairMotionTarget();
+    if (!t) return;
+
+    if (op === "y") {
+      this.yankRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
+      return;
+    }
+
+    this.deleteRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
+    if (op === "c") this.mode = "insert";
+  }
+
   private getDelimitedTextObjectCursorAbs(): number {
     const lines = this.getLines();
     const cursor = this.getCursor();
@@ -2858,16 +2870,11 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handlePendingYank(data: string): void {
-    if (this.isDigit(data)) {
-      if (this.operatorCount.length === 0) {
-        if (data !== "0") {
-          this.operatorCount = data;
-          return;
-        }
-      } else {
-        this.operatorCount += data;
-        return;
-      }
+    if (this.opDigit(data)) return;
+
+    if (data === "%") {
+      this.applyPercentOp();
+      return;
     }
 
     if (data === "y") {
