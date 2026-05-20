@@ -72,12 +72,12 @@ const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
 const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 const CLIPBOARD_READ_TIMEOUT_MS = 750;
 const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
-const MODE_COLOR_DEFAULTS = {
+const MODE_COLORS = {
   insert: "borderMuted",
   normal: "borderAccent",
   ex: "warning",
-} satisfies Required<ModeColorSettings>;
-const SAFE_THEME_TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+} as const;
+const TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 
 type EditorSnapshot = {
   text: string;
@@ -102,7 +102,7 @@ type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 type ClipboardReadFn = () => string | null;
 type ClipboardProcess = ReturnType<typeof spawn>;
 
-type ModeColorKey = keyof Required<ModeColorSettings>;
+type ModeColorKey = keyof typeof MODE_COLORS;
 type ModeColorizers = Record<ModeColorKey, (s: string) => string>;
 type ModalEditorOptions = {
   labelColorizers?: ModeColorizers | null;
@@ -127,26 +127,26 @@ function resolveModeColors(
   colors?: ModeColorSettings,
 ): Required<ModeColorSettings> {
   return {
-    insert: colors?.insert ?? MODE_COLOR_DEFAULTS.insert,
-    normal: colors?.normal ?? MODE_COLOR_DEFAULTS.normal,
-    ex: colors?.ex ?? MODE_COLOR_DEFAULTS.ex,
+    insert: colors?.insert ?? MODE_COLORS.insert,
+    normal: colors?.normal ?? MODE_COLORS.normal,
+    ex: colors?.ex ?? MODE_COLORS.ex,
   };
 }
 function colorizeWithTheme(
   theme: ThemeLike,
   token: string,
-  fallbackToken: string,
+  fallback: string,
   text: string,
 ): string {
   const trimmedToken = token.trim();
-  if (SAFE_THEME_TOKEN.test(trimmedToken)) {
+  if (TOKEN.test(trimmedToken)) {
     try {
       return theme.fg(trimmedToken, text);
     } catch {
-      return theme.fg(fallbackToken, text);
+      return theme.fg(fallback, text);
     }
   }
-  return theme.fg(fallbackToken, text);
+  return theme.fg(fallback, text);
 }
 function buildModeColorizers(
   theme: ThemeLike,
@@ -154,13 +154,7 @@ function buildModeColorizers(
   transform: (text: string) => string = (text) => text,
 ): ModeColorizers {
   const colorizer = (mode: ModeColorKey) => (text: string) =>
-    colorizeWithTheme(
-      theme,
-      colors[mode],
-      MODE_COLOR_DEFAULTS[mode],
-      transform(text),
-    );
-
+    colorizeWithTheme(theme, colors[mode], MODE_COLORS[mode], transform(text));
   return {
     insert: colorizer("insert"),
     normal: colorizer("normal"),

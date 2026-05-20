@@ -32,6 +32,8 @@ Clipboard write mirroring is controlled by `piVim.clipboardMirror`:
 
 The setting controls which local register writes cross the OS clipboard boundary. `p` / `P` keep non-mirrored writes local.
 
+Mode colors: `piVim.modeColors` accepts pi theme tokens (`insert`: `borderMuted`, `normal`: `borderAccent`, `ex`: `warning`); missing keys and unknown tokens use defaults. `piVim.syncBorderColorWithMode` defaults `false`; `true` syncs border to mode, overriding Pi's normal thinking-level border signal.
+
 ## wrapping pi-vim
 
 Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). Inverse order, insert delegates, and generic composition are unsupported.
@@ -72,7 +74,7 @@ u          # undo
 2}         # jump two paragraphs forward
 ```
 
-Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored.
+Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored and configurable.
 
 Requires `@mariozechner/pi-tui >= 0.47.0`. With `pi-tui >= 0.49.3` and DECSCUSR support, cursor shape follows mode; otherwise software cursor remains.
 
