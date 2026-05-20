@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
 
       - name: Check npm version availability
@@ -34,9 +34,6 @@ jobs:
           fi
 
       - run: npm ci
-        if: steps.version_check.outputs.should_publish == 'true'
-
-      - run: npm install -g npm@latest
         if: steps.version_check.outputs.should_publish == 'true'
 
       - run: npm run lint
