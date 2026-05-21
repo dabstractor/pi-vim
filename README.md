@@ -34,37 +34,11 @@ The setting controls which local register writes cross the OS clipboard boundary
 
 ### mode colors
 
-`piVim.modeColors` maps modes to Pi theme token names. Values are passed to Pi's `theme.fg(token, text)`, so prefer tokens that Pi themes already use for foreground text, status, or editor borders:
+`piVim.modeColors` accepts Pi theme foreground token names, not raw color literals.
 
-```json
-{
-  "piVim": {
-    "modeColors": {
-      "insert": "borderMuted",
-      "normal": "borderAccent",
-      "ex": "warning"
-    },
-    "syncBorderColorWithMode": false
-  }
-}
-```
+Usual/safest: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 
-Defaults are `insert`: `borderMuted`, `normal`: `borderAccent`, and `ex`: `warning`. Missing keys and unknown tokens use defaults.
-
-Safe starting tokens:
-
-| use | tokens |
-|-----|--------|
-| default/editor | `border`, `borderMuted`, `borderAccent`, `bashMode` |
-| status/accent | `accent`, `success`, `error`, `warning` |
-| quiet/default text | `muted`, `dim`, `text`, `thinkingText` |
-| thinking levels | `thinkingOff`, `thinkingMinimal`, `thinkingLow`, `thinkingMedium`, `thinkingHigh`, `thinkingXhigh` |
-| markdown/tool foregrounds | `toolTitle`, `toolOutput`, `mdHeading`, `mdLink`, `mdLinkUrl`, `mdCode`, `mdCodeBlock`, `mdQuote`, `mdQuoteBorder`, `mdHr`, `mdListBullet`, `toolDiffAdded`, `toolDiffRemoved`, `toolDiffContext` |
-| syntax foregrounds | `syntaxComment`, `syntaxKeyword`, `syntaxFunction`, `syntaxVariable`, `syntaxString`, `syntaxNumber`, `syntaxType`, `syntaxOperator`, `syntaxPunctuation` |
-
-Avoid background tokens for mode label foregrounds: `selectedBg`, `userMessageBg`, `customMessageBg`, `toolPendingBg`, `toolSuccessBg`, and `toolErrorBg` can be low contrast when used through `theme.fg`.
-
-`piVim.syncBorderColorWithMode` defaults `false`; `true` syncs border to mode, overriding Pi's normal thinking-level border signal.
+Contextual: `userMessageText`, `customMessageText`, `customMessageLabel`, `toolTitle`, `toolOutput`, `bashMode`.
 
 ## wrapping pi-vim
 
