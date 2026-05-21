@@ -15,7 +15,12 @@ export type DelimiterSpec = {
 
 export type MatchingPairKind = "()" | "[]" | "{}";
 
-export type MatchingPairMotionTarget = { pair: MatchingPairKind; sourceAbs: number; targetAbs: number; rangeAnchorAbs: number };
+export type MatchingPairMotionTarget = {
+  pair: MatchingPairKind;
+  sourceAbs: number;
+  targetAbs: number;
+  rangeAnchorAbs: number;
+};
 
 function normalizeCount(count: number): number {
   if (!Number.isFinite(count) || count < 1) return 1;
@@ -66,7 +71,13 @@ function isWhitespace(ch: string | undefined): boolean {
 }
 
 function pairKind(ch?: string): MatchingPairKind | null {
-  return ch === "(" || ch === ")" ? "()" : ch === "[" || ch === "]" ? "[]" : ch === "{" || ch === "}" ? "{}" : null;
+  return ch === "(" || ch === ")"
+    ? "()"
+    : ch === "[" || ch === "]"
+      ? "[]"
+      : ch === "{" || ch === "}"
+        ? "{}"
+        : null;
 }
 
 function scanSameDelimiterPairs(
@@ -89,8 +100,16 @@ function scanSameDelimiterPairs(
 }
 
 export function normalizeDelimiterKey(key: string): DelimiterSpec | null {
-  if (key === "\"" || key === "'" || key === "`") return { type: "quote", open: key, close: key };
-  const pair = key === "(" || key === ")" || key === "b" ? "()" : key === "[" || key === "]" ? "[]" : key === "{" || key === "}" || key === "B" ? "{}" : null;
+  if (key === '"' || key === "'" || key === "`")
+    return { type: "quote", open: key, close: key };
+  const pair =
+    key === "(" || key === ")" || key === "b"
+      ? "()"
+      : key === "[" || key === "]"
+        ? "[]"
+        : key === "{" || key === "}" || key === "B"
+          ? "{}"
+          : null;
   return pair ? { type: "bracket", open: pair[0], close: pair[1] } : null;
 }
 
@@ -131,7 +150,10 @@ export function resolveQuoteObjectRange(
     }
 
     if (openIndex <= cursor && cursor <= index) {
-      if (bestPair === null || index - openIndex < bestPair.close - bestPair.open) {
+      if (
+        bestPair === null ||
+        index - openIndex < bestPair.close - bestPair.open
+      ) {
         bestPair = { open: openIndex, close: index };
       }
     }
@@ -198,18 +220,33 @@ export function resolveMatchingPairMotionTarget(
   currentLineStartAbs: number,
   currentLineEndAbs: number,
 ): MatchingPairMotionTarget | null {
-  const start = currentLineStartAbs, end = currentLineEndAbs;
+  const start = currentLineStartAbs,
+    end = currentLineEndAbs;
   if (!text.length || start >= end) return null;
   const visibleEol = cursorAbs >= end;
   let sourceAbs = visibleEol ? end - 1 : Math.max(cursorAbs, start);
   const rangeAnchorAbs = visibleEol ? sourceAbs : cursorAbs;
   let pair = pairKind(text[sourceAbs]);
-  for (let index = sourceAbs + 1; !visibleEol && !pair && index < end; index++) {
+  for (
+    let index = sourceAbs + 1;
+    !visibleEol && !pair && index < end;
+    index++
+  ) {
     pair = pairKind(text[index]);
     if (pair) sourceAbs = index;
   }
   if (!pair) return null;
-  const targetAbs = scanSameDelimiterPairs(text, pair[0], pair[1], (openAbs, closeAbs) => openAbs === sourceAbs ? closeAbs : closeAbs === sourceAbs ? openAbs : null);
+  const targetAbs = scanSameDelimiterPairs(
+    text,
+    pair[0],
+    pair[1],
+    (openAbs, closeAbs) =>
+      openAbs === sourceAbs
+        ? closeAbs
+        : closeAbs === sourceAbs
+          ? openAbs
+          : null,
+  );
   if (targetAbs !== null) return { pair, sourceAbs, targetAbs, rangeAnchorAbs };
 
   return null;

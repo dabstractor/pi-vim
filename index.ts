@@ -1410,7 +1410,8 @@ export class ModalEditor extends CustomEditor {
   }
 
   private opDigit(data: string): boolean {
-    if (!this.isDigit(data) || (data === "0" && !this.operatorCount)) return false;
+    if (!this.isDigit(data) || (data === "0" && !this.operatorCount))
+      return false;
     this.operatorCount += data;
     return true;
   }

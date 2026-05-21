@@ -9,13 +9,17 @@ import {
   resolveWordTextObjectRange,
 } from "../text-objects.js";
 
-function currentLineBoundsFor(text: string, cursorAbs: number): {
+function currentLineBoundsFor(
+  text: string,
+  cursorAbs: number,
+): {
   currentLineStartAbs: number;
   currentLineEndAbs: number;
 } {
-  const cursorForLine = cursorAbs > 0 && (cursorAbs >= text.length || text[cursorAbs] === "\n")
-    ? cursorAbs - 1
-    : cursorAbs;
+  const cursorForLine =
+    cursorAbs > 0 && (cursorAbs >= text.length || text[cursorAbs] === "\n")
+      ? cursorAbs - 1
+      : cursorAbs;
   const currentLineStartAbs = text.lastIndexOf("\n", cursorForLine) + 1;
   const nextNewline = text.indexOf("\n", currentLineStartAbs);
   const currentLineEndAbs = nextNewline === -1 ? text.length : nextNewline;
