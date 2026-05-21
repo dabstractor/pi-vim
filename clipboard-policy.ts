@@ -1,11 +1,6 @@
 export type ClipboardMirrorPolicy = "all" | "yank" | "never";
 export type RegisterWriteSource = "mutation" | "yank";
 export const DEFAULT_CLIPBOARD_MIRROR_POLICY: ClipboardMirrorPolicy = "all";
-export {
-  readPiVimClipboardMirrorSetting,
-  readPiVimSettings,
-  setPiVimSettingsReaderForTests,
-} from "./settings.js";
 
 function fmt(v: unknown) {
   const type = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;

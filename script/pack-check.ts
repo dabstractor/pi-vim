@@ -65,9 +65,9 @@ const FORBIDDEN_REGEX_BY_GLOB: Record<
 
 const THRESHOLDS = {
   maxFiles: 12,
-  // WORD/delimited text objects plus public compatibility shims add package surface.
+  // WORD/delimited text objects plus mode-color settings add package surface.
   // Keep budgets tight enough to catch accidental docs/tests in the package.
-  maxSize: 31300,
+  maxSize: 31400,
   maxUnpackedSize: 139500,
 } as const;
 

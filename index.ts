@@ -107,7 +107,6 @@ type ModalEditorOptions = {
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
 };
-type ModalEditorConstructorOptions = ModalEditorOptions | ModeColorizers;
 type ThemeLike = { fg(token: string, text: string): string };
 
 type CursorShapeSequence =
@@ -160,22 +159,6 @@ function buildModeColorizers(
     normal: colorizer("normal"),
     ex: colorizer("ex"),
   };
-}
-function isModeColorizerMap(
-  opts: ModalEditorConstructorOptions,
-): opts is ModeColorizers {
-  const candidate = opts as Partial<Record<ModeColorKey, unknown>>;
-  return (
-    typeof candidate.insert === "function" &&
-    typeof candidate.normal === "function" &&
-    typeof candidate.ex === "function"
-  );
-}
-function normalizeModalEditorOptions(
-  opts: ModalEditorConstructorOptions | undefined,
-): ModalEditorOptions {
-  if (!opts) return {};
-  return isModeColorizerMap(opts) ? { labelColorizers: opts } : opts;
 }
 
 type CursorShapeTuiCandidate = {
@@ -663,13 +646,12 @@ export class ModalEditor extends CustomEditor {
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
     kb: CustomEditorConstructorArgs[2],
-    opts?: ModalEditorConstructorOptions,
+    opts?: ModalEditorOptions,
   ) {
     super(tui, theme, kb);
-    const editorOptions = normalizeModalEditorOptions(opts);
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
-    this.labelColorizers = editorOptions.labelColorizers ?? null;
-    this.borderColorizers = editorOptions.borderColorizers ?? null;
+    this.labelColorizers = opts?.labelColorizers ?? null;
+    this.borderColorizers = opts?.borderColorizers ?? null;
     this.installModeBorderColorizer();
   }
 
@@ -722,6 +704,10 @@ export class ModalEditor extends CustomEditor {
     let base = this.borderColor;
     const modeBorderColor = (text: string) =>
       (this.borderColorizers?.[this.getActiveMode()] ?? base)(text);
+    // Pi assigns its default border color after extension editor construction.
+    // Keep a mode-aware getter installed and treat later assignments as the
+    // fallback/base color, otherwise syncBorderColorWithMode is overwritten in
+    // real sessions even though direct editor tests pass.
     Object.defineProperty(this, "borderColor", {
       configurable: true,
       enumerable: true,

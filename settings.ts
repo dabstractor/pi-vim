@@ -45,6 +45,9 @@ export function readPiVimClipboardMirrorSetting(g: unknown, p: unknown) {
 
 export function readPiVimModeColors(g: unknown, p: unknown) {
   const v = get(p, "modeColors");
+  // Project settings are a whole-setting override. If a project checks in an
+  // invalid modeColors value, fall back to pi-vim defaults instead of leaking a
+  // developer's global colors into that project.
   if (v !== M) return colors(v);
   const w = get(g, "modeColors");
   return colors(w);

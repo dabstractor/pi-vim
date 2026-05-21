@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import {
   DEFAULT_CLIPBOARD_MIRROR_POLICY,
-  readPiVimClipboardMirrorSetting,
-  readPiVimSettings,
   resolveClipboardMirrorPolicy,
-  setPiVimSettingsReaderForTests,
 } from "../clipboard-policy.js";
 
 describe("clipboard mirror policy resolver", () => {
@@ -54,26 +50,5 @@ describe("clipboard mirror policy resolver", () => {
     assert.equal(result.policy, "all");
     assert.match(result.warning ?? "", /object/);
     assert.match(result.warning ?? "", /all, yank, never/);
-  });
-
-  it("keeps settings helper re-exports available", () => {
-    assert.equal(
-      readPiVimClipboardMirrorSetting(
-        { piVim: { clipboardMirror: "all" } },
-        { piVim: { clipboardMirror: "never" } },
-      ),
-      "never",
-    );
-
-    const restore = setPiVimSettingsReaderForTests(() => ({
-      clipboardMirror: "yank",
-    }));
-    try {
-      assert.deepEqual(readPiVimSettings(process.cwd()), {
-        clipboardMirror: "yank",
-      });
-    } finally {
-      restore();
-    }
   });
 });

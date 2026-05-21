@@ -744,14 +744,6 @@ function assertInsertBorderAfterModeChangingCommand(
   );
 }
 
-function assertRenderedTextIncludes(editor: ModalEditor, text: string): void {
-  assert.equal(
-    editor.render(80).some((line) => line.includes(text)),
-    true,
-    `expected rendered editor to include ${JSON.stringify(text)}`,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Wrapper-facing editor surface
 // ---------------------------------------------------------------------------
@@ -1257,17 +1249,6 @@ describe("clipboard mirror policy settings", () => {
 
 describe("mode color settings", () => {
   const reverseInsertLabel = "\x1b[7m INSERT \x1b[27m";
-
-  it("accepts legacy direct label colorizer maps", () => {
-    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
-      insert: (s: string) => `<insert>${s}</insert>`,
-      normal: (s: string) => `<normal>${s}</normal>`,
-      ex: (s: string) => `<ex>${s}</ex>`,
-    });
-
-    assertRenderedTextIncludes(editor, "<insert> INSERT </insert>");
-    assert.equal(editor.borderColor("border"), "border");
-  });
 
   it("mode label uses default insert, normal, and EX mode color tokens", async () => {
     const theme = createRecordingTheme();
