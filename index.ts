@@ -709,8 +709,6 @@ export class ModalEditor extends CustomEditor {
     // fallback/base color, otherwise syncBorderColorWithMode is overwritten in
     // real sessions even though direct editor tests pass.
     Object.defineProperty(this, "borderColor", {
-      configurable: true,
-      enumerable: true,
       get: () => modeBorderColor,
       set(next: unknown) {
         if (typeof next === "function") base = next as typeof base;

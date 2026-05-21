@@ -1480,11 +1480,6 @@ describe("mode color settings", () => {
       // editor's borderColor onto the extension editor after the factory
       // returns. The mode-aware border hook must survive that assignment.
       editor.borderColor = defaultEditorBorderColor;
-      const descriptor = Object.getOwnPropertyDescriptor(editor, "borderColor");
-
-      assert.equal(descriptor?.configurable, true);
-      assert.equal(descriptor?.enumerable, true);
-
       assert.equal(
         editor.borderColor("border"),
         "<insertToken>border</insertToken>",
