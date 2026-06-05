@@ -1,0 +1,116 @@
+import { describe, it } from "node:test";
+import { assertMatchesNvim, type NvimParityCase } from "./nvim-oracle.js";
+
+const PUT_PARITY_CASES: NvimParityCase[] = [
+  {
+    name: "p puts a character-wise register after the cursor",
+    initial: { text: "ab", cursor: { line: 0, col: 0 }, register: "X" },
+    keys: ["p"],
+  },
+  {
+    name: "P puts a character-wise register before the cursor",
+    initial: { text: "ab", cursor: { line: 0, col: 0 }, register: "X" },
+    keys: ["P"],
+  },
+  {
+    name: "p puts a line-wise register below the current line",
+    initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "X\n" },
+    keys: ["p"],
+  },
+  {
+    name: "P puts a line-wise register above the current line",
+    initial: { text: "a\nb", cursor: { line: 1, col: 0 }, register: "X\n" },
+    keys: ["P"],
+  },
+];
+
+const JOIN_PARITY_CASES: NvimParityCase[] = [
+  {
+    name: "J joins the next line with a separating space",
+    initial: {
+      text: "foo\nbar",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["J"],
+  },
+  {
+    name: "J trims leading whitespace from the right line",
+    initial: {
+      text: "foo\n  bar",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["J"],
+  },
+  {
+    name: "J preserves trailing whitespace on the left line",
+    initial: {
+      text: "foo  \nbar",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["J"],
+  },
+  {
+    name: "gJ joins without whitespace normalization",
+    initial: {
+      text: "foo\nbar",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["g", "J"],
+  },
+  {
+    name: "gJ preserves leading whitespace on the right line",
+    initial: {
+      text: "foo\n  bar",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["g", "J"],
+  },
+  {
+    name: "3J joins three lines with normalization",
+    initial: {
+      text: "a\nb\nc\nd",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["3", "J"],
+  },
+  {
+    name: "3gJ joins three lines without normalization",
+    initial: {
+      text: "a\nb\nc\nd",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["3", "g", "J"],
+  },
+  {
+    name: "J on the last line is a no-op",
+    initial: {
+      text: "foo\nbar",
+      cursor: { line: 1, col: 0 },
+      register: "keep",
+    },
+    keys: ["J"],
+  },
+];
+
+describe("nvim parity put", () => {
+  for (const testCase of PUT_PARITY_CASES) {
+    it(testCase.name, async () => {
+      await assertMatchesNvim(testCase);
+    });
+  }
+});
+
+describe("nvim parity joins", () => {
+  for (const testCase of JOIN_PARITY_CASES) {
+    it(testCase.name, async () => {
+      await assertMatchesNvim(testCase);
+    });
+  }
+});

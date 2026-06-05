@@ -26,7 +26,7 @@
     "lint": "biome check . && eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test 'test/**/*.test.ts'",
-    "test:nvim": "node --import tsx/esm --test test/nvim-parity.ts",
+    "test:nvim": "node --import tsx/esm --test 'test/nvim-parity*.ts'",
     "check": "npm run lint && npm run typecheck && npm run test",
     "pack:check": "node --import tsx/esm script/pack-check.ts",
     "hooks:install": "lefthook install",
