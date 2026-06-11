@@ -67,6 +67,12 @@ Reviewers MUST flag:
   without tests for redo clearing on real edits, harmless
   inputs preserving history, exhausted-history clamp, and
   stale-cache/stale-redo prevention after edits.
+- Asynchronous, debounced, or coalesced state transitions
+  (mode-change hooks, event listeners, queues) without tests
+  treating every transition as real: latest-wins coalescing
+  (stale transitions never applied), no-op or unconfigured
+  transitions still updating current state, and each subset
+  of configured handlers (only-A, only-B, neither).
 - Register or clipboard changes without unnamed-register
   coverage and best-effort clipboard mirroring coverage.
 - Unicode or char-motion changes without grapheme-safe tests.
