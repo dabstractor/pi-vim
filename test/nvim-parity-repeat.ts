@@ -95,16 +95,41 @@ const REPEAT_PARITY_CASES: NvimParityCase[] = [
     initial: { text: "hello world", cursor: { line: 0, col: 0 } },
     keys: ["x", "d", "."],
   },
+  {
+    name: "s then . repeats the change",
+    initial: { text: "foo", cursor: { line: 0, col: 0 } },
+    keys: ["s", "Q", "\x1b", "."],
+  },
+  {
+    name: "o then . repeats the change",
+    initial: { text: "foo\nbar", cursor: { line: 0, col: 0 } },
+    keys: ["o", "Z", "\x1b", "."],
+  },
+  {
+    name: "i then . repeats the change",
+    initial: { text: "foo", cursor: { line: 0, col: 0 } },
+    keys: ["i", "Z", "\x1b", "."],
+  },
+  {
+    name: "2s then 3. replaces the recorded count through insert",
+    initial: { text: "abcde", cursor: { line: 0, col: 0 } },
+    keys: ["2", "s", "Z", "\x1b", "3", "."],
+  },
 ];
 
 // Known divergences from nvim, tracked as skipped parity cases per AGENTS.md.
+// Insert-mode change RECORDING (Phase 2) is complete: s/o/i now capture
+// inserted text and `.` replays it. The remaining skips are pre-existing
+// OPERATOR divergences (not repeat bugs), analogous to the p/P gap below.
 const KNOWN_NVIM_PARITY_GAPS = new Set([
-  // Phase 2: insert-mode change recording. cw/s/cc/o/O capture free-form
-  // insert text, which Phase 1 does not record, so `.` after them replays only
-  // the (empty) pre-insert portion or no-ops.
+  // Pre-existing cw divergence: pi-vim's cw includes trailing whitespace,
+  // while nvim special-cases cw to act like ce on a word. Observable on `.`
+  // because it re-evaluates the cw from the cursor. Out of scope here.
   "cw then . repeats the change",
+  // Pre-existing cc register divergence: pi-vim stores the changed line
+  // charwise ("foo") while nvim stores it linewise ("foo\n"). The repeated
+  // text/cursor match nvim; only the register differs.
   "cc then . repeats the change",
-  "s then . repeats the change",
   // Dual-count forms collapse to a single count under withReplacedCount; nvim
   // keeps both counts distinct.
   "2d3w then . dual-count form",
@@ -117,6 +142,9 @@ const KNOWN_NVIM_PARITY_GAPS = new Set([
   "P then . pastes the register twice before",
 ]);
 
+// Cases kept here are always skipped (it.skip) and mirrored in the gap set
+// above. s/o/i graduated to REPEAT_PARITY_CASES now that recording works; cw/cc
+// remain here due to the pre-existing operator divergences documented above.
 const REPEAT_PARITY_GAPS: NvimParityCase[] = [
   {
     name: "cw then . repeats the change",
@@ -127,11 +155,6 @@ const REPEAT_PARITY_GAPS: NvimParityCase[] = [
     name: "cc then . repeats the change",
     initial: { text: "foo\nbar", cursor: { line: 0, col: 0 } },
     keys: ["c", "c", "Z", "\x1b", "."],
-  },
-  {
-    name: "s then . repeats the change",
-    initial: { text: "foo", cursor: { line: 0, col: 0 } },
-    keys: ["s", "Q", "\x1b", "."],
   },
   {
     name: "2d3w then . dual-count form",

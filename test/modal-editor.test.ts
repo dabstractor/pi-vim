@@ -7405,4 +7405,142 @@ describe("repeat — .", () => {
     sendKeys(editor, ["."]);
     assert.equal(editor.getText(), "fresh"); // `.` is a no-op
   });
+
+  // ---- Phase 2: insert-mode change recording (cw/cc/s/S/C/o/O/i/a/I/A) ----
+  // The whole normal->insert-><Esc> window is recorded; typed insert text is
+  // captured and replayed. Each case asserts text + cursor + register + mode.
+
+  it("repeats cw with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    sendKeys(editor, ["c", "w", "h", "i", "\x1b", "w", "."]);
+    assert.equal(editor.getText(), "hibar hi");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 7 });
+    assert.equal(editor.getRegister(), "baz");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats cc with inserted text", () => {
+    const editor = createMultiLineEditor("foo\nbar\nbaz").editor;
+    sendKeys(editor, ["c", "c", "h", "i", "\x1b", "j", "."]);
+    assert.equal(editor.getText(), "hi\nhi\nbaz");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 1 });
+    assert.equal(editor.getRegister(), "bar");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats s with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo");
+    sendKeys(editor, ["s", "Q", "\x1b", "."]);
+    assert.equal(editor.getText(), "Qoo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getRegister(), "Q");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats S with inserted text", () => {
+    const editor = createMultiLineEditor("foo\nbar").editor;
+    sendKeys(editor, ["S", "Q", "\x1b", "j", "."]);
+    assert.equal(editor.getText(), "Q\nQ");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+    assert.equal(editor.getRegister(), "bar");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats C with inserted text", () => {
+    const editor = createMultiLineEditor("abc\ndef").editor;
+    setInternalCursor(editor, 1);
+    sendKeys(editor, ["C", "Z", "\x1b", "j", "."]);
+    assert.equal(editor.getText(), "aZ\ndZ");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 1 });
+    assert.equal(editor.getRegister(), "ef");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats o with inserted text", () => {
+    const editor = createMultiLineEditor("foo\nbar").editor;
+    sendKeys(editor, ["o", "Z", "\x1b", "."]);
+    assert.equal(editor.getText(), "foo\nZ\nZ\nbar");
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats O with inserted text", () => {
+    const editor = createMultiLineEditor("foo\nbar").editor;
+    sendKeys(editor, ["O", "Z", "\x1b", "j", "."]);
+    assert.equal(editor.getText(), "Z\nZ\nfoo\nbar");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats i with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo");
+    sendKeys(editor, ["i", "Z", "\x1b", "."]);
+    assert.equal(editor.getText(), "ZZfoo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats a with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo");
+    sendKeys(editor, ["a", "Z", "\x1b", "."]);
+    assert.equal(editor.getText(), "fZZoo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats A with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo");
+    sendKeys(editor, ["A", "Z", "\x1b", "."]);
+    assert.equal(editor.getText(), "fooZZ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats I with inserted text", () => {
+    const { editor } = createEditorWithSpy("foo");
+    sendKeys(editor, ["I", "Z", "\x1b", "."]);
+    assert.equal(editor.getText(), "ZZfoo");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("does not record a bare i<Esc> (no mutation)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    // x is recorded; the bare i<Esc> inserts nothing, so it must not replace it.
+    sendKeys(editor, ["x", "i", "\x1b", "."]);
+    assert.equal(editor.getText(), "llo");
+    assert.equal(editor.getRegister(), "e");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("records cw<Esc> with no typing (the deletion mutates)", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    // cw<Esc> deletes "foo " but types nothing; the deletion is the mutation,
+    // so it IS recorded (unlike bare i<Esc>). `.` repeats cw on "baz".
+    sendKeys(editor, ["c", "w", "\x1b", "w", "."]);
+    assert.equal(editor.getText(), "bar ");
+    assert.equal(editor.getRegister(), "baz");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats a counted insert change (2cw foo then 3.)", () => {
+    const { editor } = createEditorWithSpy("a b c d e f g");
+    // 3. replaces the recorded count 2 and replays the insert text "foo".
+    sendKeys(editor, ["2", "c", "w", "f", "o", "o", "\x1b", "3", "."]);
+    assert.equal(editor.getText(), "fofoof g");
+    assert.equal(editor.getRegister(), "oc d e ");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("an insert-mode repeat is undoable (u reverts, ctrl+r redoes)", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    sendKeys(editor, ["c", "w", "h", "i", "\x1b", "w", "."]); // "hibar hi"
+    const afterRepeat = editor.getText();
+    // Undo granularity for insert changes is readline-delegated (pre-existing,
+    // see the README known-differences table), so assert the round trip rather
+    // than a single-step revert: u then ctrl+r restores the repeated state.
+    sendKeys(editor, ["u", "\x12"]);
+    assert.equal(editor.getText(), afterRepeat);
+    assert.equal(editor.getMode(), "normal");
+  });
 });

@@ -341,11 +341,11 @@ Put reads the OS clipboard first unless the last local register write was not mi
 
 ### repeat (dot)
 
-`.` replays the last normal-mode change from the current cursor: `x`, `{count}x`, `r{char}`, `{count}r{char}`, `p`, `P`, `J`, `gJ`, `D`, and every delete form (`dw`, `dd`, `d$`, `df{char}`, `daw`, `di(`, …). Motions, yanks, and `u` / `<C-r>` are not recorded, so `.` repeats the most recent change even after navigating or yanking.
+`.` replays the last change from the current cursor, including changes that pass through insert mode: `x`, `{count}x`, `r{char}`, `{count}r{char}`, `p`, `P`, `J`, `gJ`, `D`, every delete form (`dw`, `dd`, `d$`, `df{char}`, `daw`, `di(`, …), and every change/insert form (`c{motion}`, `cc`, `s`, `S`, `C`, `o`, `O`, `i`, `a`, `I`, `A`). Typed insert text is captured, so `cw hi<Esc>` then `.` deletes the next word and inserts `hi`. Motions, yanks, and `u` / `<C-r>` are not recorded, so `.` repeats the most recent change even after navigating or yanking. A change that mutates nothing (e.g. bare `i<Esc>`) is not recorded.
 
 | key | action |
 |-----|--------|
-| `.` | Repeat the last normal-mode change at the current cursor |
+| `.` | Repeat the last change at the current cursor |
 | `{count}.` | Repeat with `{count}` replacing the recorded count |
 
 `{count}.` strips the recorded count (prefix or operator-count) and substitutes `{count}`, so `2x` then `3.` deletes three chars and `d2w` then `3.` deletes three words. Pressing `.` while an operator is pending cancels the operator and is itself discarded (e.g. `d .` cancels `d` and does not repeat), matching Vim. `.` itself is never recorded, so `..` repeats the original change twice. Repeats produce normal undoable edits: `u` after `.` reverts one repeat step.
@@ -373,7 +373,7 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
 | Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
-| Repeat (`.`) | Records normal-mode changes only. `{count}.` replaces the recorded count; dual-count (`2d3w`) collapses to one count; insert-mode changes (`cw`, `s`, `cc`, `o`, `O`) are not yet recorded† | Records the full change incl. inserted text and counts |
+| Repeat (`.`) | Records the full change incl. inserted text. `{count}.` replaces the recorded count; dual-count (`2d3w`) collapses to one count; `p .` / `P .` drift due to the put cursor divergence† | Records the full change incl. inserted text and counts |
 | Visual mode | Not implemented | `v`, `V`, `<C-v>` |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, mixed-delimiter validation, or Visual `%` yet | Also supports percentage jumps and broader matching |

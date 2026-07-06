@@ -670,6 +670,8 @@ export class ModalEditor extends CustomEditor {
   private lastCharMotion: LastCharMotion | null = null;
   private recordingKeys: string[] = [];
   private recordingSuppressed: boolean = false;
+  private recordingInsert: boolean = false;
+  private recordingStartText: string = "";
   private lastChange: string[] | null = null;
   private replaying: boolean = false;
   private discardingBracketedPasteInNormalMode: boolean = false;
@@ -776,6 +778,18 @@ export class ModalEditor extends CustomEditor {
   private setMode(mode: Mode = "insert"): void {
     const prev = this.mode;
     this.mode = mode;
+    // Dot-repeat: when an in-flight change enters insert mode (cw, cc, s, o,
+    // i, ...), start capturing the insert keystrokes too. recordingKeys already
+    // holds the command keys (each is pushed before its dispatch runs), and
+    // !replaying keeps replay from re-triggering recording.
+    if (
+      mode === "insert" &&
+      prev !== "insert" &&
+      !this.replaying &&
+      this.recordingKeys.length > 0
+    ) {
+      this.recordingInsert = true;
+    }
     if (prev !== mode) {
       try {
         this.modeChangeFn(mode, prev);
@@ -790,6 +804,8 @@ export class ModalEditor extends CustomEditor {
     this.lastChange = null;
     this.recordingKeys.length = 0;
     this.recordingSuppressed = false;
+    this.recordingInsert = false;
+    this.recordingStartText = "";
     super.setText(text);
   }
 
@@ -1007,6 +1023,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingGCount = "";
     this.pendingReplace = false;
     this.recordingKeys.length = 0;
+    this.recordingInsert = false;
     this.clearPendingExCommand();
   }
 
@@ -1039,12 +1056,25 @@ export class ModalEditor extends CustomEditor {
   }
 
   // Dot-repeat recording. Records the raw effective key chunks of the
-  // in-progress normal-mode change and finalizes them when the change commits.
-  // Only changes that complete inside normal mode are captured; insert-mode
-  // changes (cw, s, cc, o, O) are not yet recorded.
+  // in-progress change and finalizes them on commit. Normal-mode changes (x,
+  // dw, dd, ...) and insert-mode changes (cw, cc, s, o, i, ...) are both
+  // captured: while recordingInsert is set, insert keystrokes (including the
+  // terminating <Esc>) are appended too, so the whole normal->insert-><Esc>
+  // window is re-fed on `.`.
   private beginRecording(data: string): void {
     if (this.replaying || this.pendingExCommand !== null) return;
-    if (this.mode !== "insert") this.recordingKeys.push(data);
+    if (this.mode !== "insert") {
+      // Snapshot the pre-change buffer once, at the first key of the recording.
+      // For insert-mode changes the mutation (typing) happens in an earlier
+      // dispatch than the <Esc> that finalizes, so a per-call snapshot could
+      // not see it; recordingStartText spans the whole change.
+      if (this.recordingKeys.length === 0) {
+        this.recordingStartText = this.recordingTextBefore();
+      }
+      this.recordingKeys.push(data);
+    } else if (this.recordingInsert) {
+      this.recordingKeys.push(data);
+    }
   }
 
   private recordingTextBefore(): string {
@@ -1059,7 +1089,7 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private finalizeRecording(textBefore: string): void {
+  private finalizeRecording(): void {
     if (this.recordingKeys.length === 0) {
       this.recordingSuppressed = false;
       return;
@@ -1068,21 +1098,27 @@ export class ModalEditor extends CustomEditor {
     if (this.recordingSuppressed) {
       this.recordingSuppressed = false;
       this.recordingKeys.length = 0;
+      this.recordingInsert = false;
       return;
     }
-    // Mid-sequence (pending operator/motion, or an insert spawned by a change
-    // that is not yet recorded): keep accumulating until the change completes.
+    // Mid-sequence (pending operator/motion, or still inside the insert spawned
+    // by a change): keep accumulating until the change completes in normal mode.
     if (this.mode === "insert" || this.hasAnyPendingState()) return;
     let current = "";
     try {
       current = this.getText();
     } catch {
-      current = textBefore;
+      // Never alter dispatch: if getText is unavailable, treat as unchanged.
+      current = this.recordingStartText;
     }
-    if (current !== textBefore) {
+    // Commit iff the buffer changed since recordingStartText. This naturally
+    // records cw<Esc> (the deletion mutates) but discards bare i<Esc> (no
+    // mutation), matching Vim.
+    if (current !== this.recordingStartText) {
       this.lastChange = this.recordingKeys.slice();
     }
     this.recordingKeys.length = 0;
+    this.recordingInsert = false;
   }
 
   private repeatLastChange(count: number): void {
@@ -1103,6 +1139,7 @@ export class ModalEditor extends CustomEditor {
     } finally {
       this.replaying = false;
       this.recordingKeys.length = 0;
+      this.recordingInsert = false;
     }
   }
 
@@ -1270,12 +1307,11 @@ export class ModalEditor extends CustomEditor {
     }
 
     this.beginRecording(data);
-    const textBefore = this.recordingTextBefore();
     try {
       this.dispatchInput(data);
     } finally {
       if (!this.replaying) {
-        this.finalizeRecording(textBefore);
+        this.finalizeRecording();
       }
     }
   }
@@ -1618,6 +1654,7 @@ export class ModalEditor extends CustomEditor {
     this.prefixCount = "";
     this.operatorCount = "";
     this.recordingKeys.length = 0;
+    this.recordingInsert = false;
     if (!this.isPrintableChunk(data)) {
       super.handleInput(data);
     }
