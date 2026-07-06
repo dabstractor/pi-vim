@@ -7115,3 +7115,294 @@ describe("replace — r{char}", () => {
     assert.equal(editor.getRegister(), "untouched");
   });
 });
+
+// ---------------------------------------------------------------------------
+// repeat — `.` (repeat last change)
+//
+// Records normal-mode changes that complete without entering insert mode
+// for free-form typing. Insert-mode changes (cw, s, cc, o, O) and dual-count
+// forms (2d3w) are documented divergences; see nvim-parity-repeat.
+// ---------------------------------------------------------------------------
+
+describe("repeat — .", () => {
+  it("is a safe no-op with no prior change", () => {
+    const { editor } = createEditorWithSpy("hello");
+    const beforeText = editor.getText();
+    const beforeCursor = editor.getCursor();
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), beforeText);
+    assert.deepEqual(editor.getCursor(), beforeCursor);
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats x", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]);
+    assert.equal(editor.getText(), "llo");
+    assert.equal(editor.getRegister(), "e");
+  });
+
+  it("repeats x grapheme-safely", () => {
+    const { editor } = createEditorWithSpy("a\u{1F600}b");
+    setInternalCursor(editor, 0);
+    sendKeys(editor, ["x", "."]);
+    assert.equal(editor.getText(), "b");
+  });
+
+  it("repeats dw", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    sendKeys(editor, ["d", "w", "."]);
+    assert.equal(editor.getText(), "baz");
+  });
+
+  it("repeats dd linewise", () => {
+    const editor = createMultiLineEditor("one\ntwo\nthree\nfour").editor;
+    sendKeys(editor, ["d", "d", "."]);
+    assert.equal(editor.getText(), "three\nfour");
+  });
+
+  it("repeats d$ (delete to end of line)", () => {
+    const editor = createMultiLineEditor("ab cd\nef gh").editor;
+    sendKeys(editor, ["d", "$"]); // deletes "ab cd" on line 0
+    sendKeys(editor, ["j", "."]); // down to line 2, repeat d$
+    assert.equal(editor.getText(), "\n");
+  });
+
+  it("repeats df{char} (char-find operator)", () => {
+    const { editor } = createEditorWithSpy("foo,bar,baz");
+    sendKeys(editor, ["d", "f", ",", "."]);
+    assert.equal(editor.getText(), "baz");
+  });
+
+  it("repeats daw (word text object)", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+    sendKeys(editor, ["d", "a", "w", "."]);
+    assert.equal(editor.getText(), "baz");
+  });
+
+  it("repeats di( (bracket text object)", () => {
+    const { editor } = createEditorWithSpy("(a)(b)");
+    sendKeys(editor, ["d", "i", "("]); // -> "()(b)", cursor in empty first pair
+    sendKeys(editor, ["f", "("]); // move to the second "("
+    sendKeys(editor, ["."]); // di( again -> "()()"
+    assert.equal(editor.getText(), "()()");
+  });
+
+  it("repeats p (character-wise put)", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("XY");
+    // pi-vim lands the put cursor after the pasted text (divergence from nvim,
+    // which lands on the last pasted char); see nvim-parity-repeat for the gap.
+    sendKeys(editor, ["p", "."]);
+    assert.equal(editor.getText(), "aXYbXY");
+  });
+
+  it("repeats P (character-wise put before)", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("XY");
+    sendKeys(editor, ["P", "."]);
+    assert.equal(editor.getText(), "XYXYab");
+  });
+
+  it("repeats linewise put", () => {
+    const editor = createMultiLineEditor("x\ny").editor;
+    editor.setRegister("L\n");
+    // p pastes a new line below line 0 (cursor lands on it); the second p
+    // therefore lands below that pasted line.
+    sendKeys(editor, ["p", "."]);
+    assert.equal(editor.getText(), "x\nL\nL\ny");
+  });
+
+  it("repeats J (join with separator)", () => {
+    const editor = createMultiLineEditor("a\nb\nc\nd").editor;
+    // J joins the current line with the next; cursor stays on the joined line,
+    // so `.` joins the (now longer) line 0 with line 1 again.
+    sendKeys(editor, ["J", "."]);
+    assert.equal(editor.getText(), "a b c\nd");
+  });
+
+  it("repeats gJ (raw join)", () => {
+    const editor = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(editor, ["g", "J", "."]);
+    assert.equal(editor.getText(), "abc");
+  });
+
+  it("repeats r{char}", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["r", "X"]);
+    assert.equal(editor.getText(), "Xello");
+    // Cursor stays on the replaced char, so `.` replaces it in place again.
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "Xello");
+  });
+
+  it("repeats {count}r{char} and honors a new count", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["2", "r", "X"]); // -> "XXllo", cursor col 1
+    assert.equal(editor.getText(), "XXllo");
+    sendKeys(editor, ["3", "."]); // replaces 3 chars from cursor col 1
+    assert.equal(editor.getText(), "XXXXo");
+  });
+
+  it("{count}. replaces the recorded count (2x then 3.)", () => {
+    const { editor } = createEditorWithSpy("abcdefgh");
+    sendKeys(editor, ["2", "x"]); // -> "cdefgh"
+    sendKeys(editor, ["3", "."]); // deletes 3 (replaces the recorded 2)
+    assert.equal(editor.getText(), "fgh");
+  });
+
+  it("{count}. on a count-less change applies the new count (x then 3.)", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+    sendKeys(editor, ["x"]); // -> "bcdef"
+    sendKeys(editor, ["3", "."]); // deletes 3
+    assert.equal(editor.getText(), "ef");
+  });
+
+  it("{count}. replaces a prefix-count operator form (2dw then 3.)", () => {
+    const { editor } = createEditorWithSpy("a b c d e f");
+    sendKeys(editor, ["2", "d", "w"]); // deletes "a b " -> "c d e f"
+    assert.equal(editor.getText(), "c d e f");
+    sendKeys(editor, ["3", "."]); // deletes 3 words -> "f"
+    assert.equal(editor.getText(), "f");
+  });
+
+  it("{count}. replaces an operator-count form (d2w then 3.)", () => {
+    const { editor } = createEditorWithSpy("a b c d e f");
+    sendKeys(editor, ["d", "2", "w"]); // deletes "a b " -> "c d e f"
+    assert.equal(editor.getText(), "c d e f");
+    sendKeys(editor, ["3", "."]); // deletes 3 words -> "f"
+    assert.equal(editor.getText(), "f");
+  });
+
+  it(".. repeats the original change twice (no self-recording)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", ".", "."]);
+    assert.equal(editor.getText(), "lo");
+  });
+
+  it("does not record pure motions (w then . repeats the prior change)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["w"]); // motion to "world" (not recorded)
+    sendKeys(editor, ["."]); // repeats x
+    assert.equal(editor.getText(), "ello orld");
+  });
+
+  it("does not record yanks (yy then . repeats the prior change)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["y", "y"]); // yank line (not recorded)
+    sendKeys(editor, ["."]); // repeats x
+    assert.equal(editor.getText(), "llo world");
+  });
+
+  it("does not record yw (yw then . repeats the prior change)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["y", "w"]); // yank word (not recorded)
+    sendKeys(editor, ["."]); // repeats x
+    assert.equal(editor.getText(), "llo world");
+  });
+
+  it("does not record undo (u then . repeats the prior change)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["u"]); // undo -> "hello world"
+    assert.equal(editor.getText(), "hello world");
+    sendKeys(editor, ["."]); // repeats x -> "ello world"
+    assert.equal(editor.getText(), "ello world");
+  });
+
+  it("does not record redo (ctrl+r then . repeats the prior change)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x", "u", "\x12"]); // x, undo, redo -> "ello world"
+    assert.equal(editor.getText(), "ello world");
+    sendKeys(editor, ["."]); // repeats x -> "llo world"
+    assert.equal(editor.getText(), "llo world");
+  });
+
+  it("does not record an aborted operator (d Esc then . is a no-op)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["d", "\x1b"]); // abort, nothing recorded
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "hello");
+  });
+
+  it("does not record a cancelled operator (d ctrl+k does not poison repeat)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    // Plugin divergence: cancelling an operator with a control char forwards
+    // the char to readline, so ctrl+k kills to EOL. The point here is that the
+    // cancelled `d` is not recorded, so `.` does not replay a dangling op.
+    sendKeys(editor, ["d", "\x0b"]);
+    assert.equal(editor.getText(), "");
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "");
+  });
+
+  it("discards '.' while an operator is pending (d . cancels and does not repeat)", () => {
+    // Matches Vim: '.' with a pending operator cancels the operator and is
+    // itself discarded — it does NOT repeat the prior change.
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["d", "."]); // d pending, '.' cancels d and is discarded
+    assert.equal(editor.getText(), "ello world");
+  });
+
+  it("discards '.' while 'g' is pending (g . cancels and does not repeat)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["g", "."]); // g pending, '.' cancels and is discarded
+    assert.equal(editor.getText(), "ello world");
+  });
+
+  it("bracketed paste between a change and '.' does not corrupt the recording", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x"]); // "ello"
+    // A bracketed paste in normal mode is stripped and clears pending state;
+    // it must not poison the committed lastChange.
+    sendKeys(editor, ["\x1b[200~PASTE\x1b[201~"]);
+    sendKeys(editor, ["."]); // repeats x -> "llo"
+    assert.equal(editor.getText(), "llo");
+  });
+
+  it("produces an undoable edit and u reverts one repeat step", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]); // "llo"
+    assert.equal(editor.getText(), "llo");
+    sendKeys(editor, ["u"]); // undo the `.` only
+    assert.equal(editor.getText(), "ello");
+  });
+
+  it("u after . then ctrl+r redoes the repeat step", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]); // "llo"
+    sendKeys(editor, ["u"]); // "ello"
+    sendKeys(editor, ["\x12"]); // redo -> "llo"
+    assert.equal(editor.getText(), "llo");
+  });
+
+  it("does not leak count to the next command (2. then l)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x"]); // "ello", cursor col 0
+    sendKeys(editor, ["2", "."]); // 2x at col 0 -> "lo"
+    assert.equal(editor.getText(), "lo");
+    sendKeys(editor, ["l"]); // should move by 1, not 2 (no count leak)
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("replays from the current cursor (dw then j then .)", () => {
+    const editor = createMultiLineEditor("foo bar\nbaz qux").editor;
+    sendKeys(editor, ["d", "w"]); // line 0: "foo bar" -> "bar"
+    assert.equal(editor.getText(), "bar\nbaz qux");
+    sendKeys(editor, ["j", "."]); // down, repeat dw on "baz qux" -> "qux"
+    assert.equal(editor.getText(), "bar\nqux");
+  });
+
+  it("external setText clears the recorded change", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["d", "w"]); // record dw
+    editor.setText("fresh"); // external mutation resets recording state
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "fresh"); // `.` is a no-op
+  });
+});

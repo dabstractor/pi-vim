@@ -625,6 +625,35 @@ class ClipboardMirror {
   }
 }
 
+function isSingleDigit(value: string): boolean {
+  return value.length === 1 && value >= "0" && value <= "9";
+}
+
+// Rebuild a recorded change so [count]. replays with the user-supplied count
+// instead of the recorded one. Strips a leading prefix count (1-9 then 0-9*)
+// and, when an operator follows, the operator count too. This is correct for
+// the common single-count forms (2x, 3dw, 2dd, 2p, 3J). Dual-count forms
+// (2d3w) collapse to a single count — a documented divergence.
+function withReplacedCount(change: string[], count: number): string[] {
+  let start = 0;
+  const first = change[0];
+  if (first && first.length === 1 && first >= "1" && first <= "9") {
+    start = 1;
+    while (start < change.length && isSingleDigit(change[start])) start++;
+  }
+
+  const rest = change.slice(start);
+  if (
+    rest.length > 0 &&
+    (rest[0] === "d" || rest[0] === "c" || rest[0] === "y")
+  ) {
+    let j = 1;
+    while (j < rest.length && isSingleDigit(rest[j])) j++;
+    return [String(count), rest[0], ...rest.slice(j)];
+  }
+  return [String(count), ...rest];
+}
+
 export class ModalEditor extends CustomEditor {
   private mode: Mode = "insert";
   private pendingMotion: PendingMotion = null;
@@ -639,6 +668,10 @@ export class ModalEditor extends CustomEditor {
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
+  private recordingKeys: string[] = [];
+  private recordingSuppressed: boolean = false;
+  private lastChange: string[] | null = null;
+  private replaying: boolean = false;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private wordBoundaryCache = new WordBoundaryCache();
@@ -754,6 +787,9 @@ export class ModalEditor extends CustomEditor {
 
   override setText(text: string): void {
     this.clearRedoStack();
+    this.lastChange = null;
+    this.recordingKeys.length = 0;
+    this.recordingSuppressed = false;
     super.setText(text);
   }
 
@@ -831,6 +867,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performUndo(count: number = this.takeTotalCount(1)): void {
+    this.recordingSuppressed = true;
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     for (let i = 0; i < maxSteps; i++) {
       let changed = false;
@@ -849,6 +886,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
+    this.recordingSuppressed = true;
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     const editor = this as unknown as ModalEditorInternals;
 
@@ -968,7 +1006,104 @@ export class ModalEditor extends CustomEditor {
     this.pendingG = false;
     this.pendingGCount = "";
     this.pendingReplace = false;
+    this.recordingKeys.length = 0;
     this.clearPendingExCommand();
+  }
+
+  private hasAnyPendingState(): boolean {
+    return (
+      this.pendingOperator !== null ||
+      this.pendingMotion !== null ||
+      this.pendingTextObject !== null ||
+      this.pendingG ||
+      this.pendingGCount.length > 0 ||
+      this.pendingReplace ||
+      this.pendingExCommand !== null ||
+      this.prefixCount.length > 0 ||
+      this.operatorCount.length > 0
+    );
+  }
+
+  // A command is mid-sequence (operator/motion/text-object/replace/g pending).
+  // Distinct from hasAnyPendingState: a bare count prefix is not an in-progress
+  // command, so `3.` still repeats with count 3.
+  private hasPendingCommand(): boolean {
+    return (
+      this.pendingOperator !== null ||
+      this.pendingMotion !== null ||
+      this.pendingTextObject !== null ||
+      this.pendingReplace ||
+      this.pendingG ||
+      this.pendingGCount.length > 0
+    );
+  }
+
+  // Dot-repeat recording. Records the raw effective key chunks of the
+  // in-progress normal-mode change and finalizes them when the change commits.
+  // Only changes that complete inside normal mode are captured; insert-mode
+  // changes (cw, s, cc, o, O) are not yet recorded.
+  private beginRecording(data: string): void {
+    if (this.replaying || this.pendingExCommand !== null) return;
+    if (this.mode !== "insert") this.recordingKeys.push(data);
+  }
+
+  private recordingTextBefore(): string {
+    if (this.replaying) return "";
+    // Recording is observational: it must never alter dispatch semantics, so a
+    // state-unavailable getText (e.g. a test sabotaging state to assert
+    // performRedo's own defensive throw) collapses to "" instead of throwing.
+    try {
+      return this.getText();
+    } catch {
+      return "";
+    }
+  }
+
+  private finalizeRecording(textBefore: string): void {
+    if (this.recordingKeys.length === 0) {
+      this.recordingSuppressed = false;
+      return;
+    }
+    // Undo/redo mutate the buffer but are not repeatable changes; discard.
+    if (this.recordingSuppressed) {
+      this.recordingSuppressed = false;
+      this.recordingKeys.length = 0;
+      return;
+    }
+    // Mid-sequence (pending operator/motion, or an insert spawned by a change
+    // that is not yet recorded): keep accumulating until the change completes.
+    if (this.mode === "insert" || this.hasAnyPendingState()) return;
+    let current = "";
+    try {
+      current = this.getText();
+    } catch {
+      current = textBefore;
+    }
+    if (current !== textBefore) {
+      this.lastChange = this.recordingKeys.slice();
+    }
+    this.recordingKeys.length = 0;
+  }
+
+  private repeatLastChange(count: number): void {
+    const change = this.lastChange;
+    if (!change || change.length === 0) return; // safe no-op, like Vim
+
+    const sequence = count === 1 ? change : withReplacedCount(change, count);
+    // Re-feeding through handleInput reuses the entire dispatch + count +
+    // operator/motion pipeline, so semantics match typed input. The replaying
+    // guard suppresses re-recording (so ".." repeats the original change, not a
+    // self-reference) and prevents infinite recursion (lastChange never
+    // contains ".").
+    this.replaying = true;
+    try {
+      for (const chunk of sequence) {
+        this.handleInput(chunk);
+      }
+    } finally {
+      this.replaying = false;
+      this.recordingKeys.length = 0;
+    }
   }
 
   private isEscapeLikeInput(data: string): boolean {
@@ -1116,6 +1251,36 @@ export class ModalEditor extends CustomEditor {
       data = filtered;
     }
 
+    if (
+      !this.replaying &&
+      this.mode !== "insert" &&
+      this.pendingExCommand === null &&
+      data === "."
+    ) {
+      // Dot-repeat. Vim discards "." when a command is already in progress
+      // (e.g. "d ." or "g ."), so check that before consuming the count.
+      // Intercepted before recording so "." itself is never recorded, and
+      // before pending-operator routing so it never feeds "." to an operator.
+      const pendingCommand = this.hasPendingCommand();
+      const count = this.takeTotalCount(1);
+      this.clearPendingState();
+      if (pendingCommand) return;
+      this.repeatLastChange(count);
+      return;
+    }
+
+    this.beginRecording(data);
+    const textBefore = this.recordingTextBefore();
+    try {
+      this.dispatchInput(data);
+    } finally {
+      if (!this.replaying) {
+        this.finalizeRecording(textBefore);
+      }
+    }
+  }
+
+  private dispatchInput(data: string): void {
     if (this.isEscapeLikeInput(data)) {
       this.handleEscape();
       return;
@@ -1452,6 +1617,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
+    this.recordingKeys.length = 0;
     if (!this.isPrintableChunk(data)) {
       super.handleInput(data);
     }

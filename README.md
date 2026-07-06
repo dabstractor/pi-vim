@@ -81,7 +81,7 @@ npm run hooks:install
 
 ## stats
 
-- **192 commands**: motions, operators, counts, text objects, undo/redo, ex quit
+- **193 commands**: motions, operators, counts, text objects, undo/redo, dot-repeat, ex quit
 - **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
 - **0 dependencies**
 
@@ -129,6 +129,7 @@ Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim par
 | Jump 2 paragraphs forward | `2}` |
 | Undo last edit | `u` |
 | Redo last undone edit | `<C-r>` |
+| Repeat last change | `.` |
 
 ---
 
@@ -338,6 +339,19 @@ Put reads the OS clipboard first unless the last local register write was not mi
 
 ---
 
+### repeat (dot)
+
+`.` replays the last normal-mode change from the current cursor: `x`, `{count}x`, `r{char}`, `{count}r{char}`, `p`, `P`, `J`, `gJ`, `D`, and every delete form (`dw`, `dd`, `d$`, `df{char}`, `daw`, `di(`, …). Motions, yanks, and `u` / `<C-r>` are not recorded, so `.` repeats the most recent change even after navigating or yanking.
+
+| key | action |
+|-----|--------|
+| `.` | Repeat the last normal-mode change at the current cursor |
+| `{count}.` | Repeat with `{count}` replacing the recorded count |
+
+`{count}.` strips the recorded count (prefix or operator-count) and substitutes `{count}`, so `2x` then `3.` deletes three chars and `d2w` then `3.` deletes three words. Pressing `.` while an operator is pending cancels the operator and is itself discarded (e.g. `d .` cancels `d` and does not repeat), matching Vim. `.` itself is never recorded, so `..` repeats the original change twice. Repeats produce normal undoable edits: `u` after `.` reverts one repeat step.
+
+---
+
 ## register and clipboard policy
 
 - `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
@@ -359,6 +373,7 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
 | Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
+| Repeat (`.`) | Records normal-mode changes only. `{count}.` replaces the recorded count; dual-count (`2d3w`) collapses to one count; insert-mode changes (`cw`, `s`, `cc`, `o`, `O`) are not yet recorded† | Records the full change incl. inserted text and counts |
 | Visual mode | Not implemented | `v`, `V`, `<C-v>` |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, mixed-delimiter validation, or Visual `%` yet | Also supports percentage jumps and broader matching |
@@ -366,6 +381,8 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | Registers / macros / search | Not implemented | Supported |
 | Ex commands | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
+
+`†` Inherited from put, not repeat: pi-vim's `p` / `P` leaves the cursor after the pasted text (Vim: on the last pasted char), so `.` replays from there and the second paste drifts right.
 
 ---
 
@@ -382,7 +399,7 @@ Explicitly deferred:
 - Delimited-object counts (`d2i"`, `2ci(`, `y2a{`)
 - Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
 - Ex surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
-- Search (`/`, `?`, `n`, `N`), repeat (`.`)
+- Search (`/`, `?`, `n`, `N`)
 - Replace mode (`R`) — only `r{char}` is supported
 - Count prefix beyond currently supported motions, including `{count}%` percent-of-file jumps
 - No insert-mode `<C-r>` expansion, no cross-session redo persistence
