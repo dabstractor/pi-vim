@@ -178,6 +178,14 @@ const THRESHOLDS = {
   // packed 49278 B, unpacked 201240 B. The packed budget still fits;
   // unpacked is bumped 200600 -> 201600, leaving ~360 B headroom. Files
   // stay at 17.
+  //
+  // Border-color "inherit" neutral-default detection: mode-colors.ts gains
+  // buildOffBorderColor + isNeutralBorder, index.ts tracks the host-assigned
+  // border base and resolves the token-based thinking-color precedence
+  // (borderMuted > thinking > accent; the label inherits the thinking color),
+  // and the README documents the mode plus its precedence rule. Measured on
+  // its original baseline: packed 51382 B, unpacked 207483 B. Files stay
+  // at 17.
   maxFiles: 17,
   maxSize: 51000,
   maxUnpackedSize: 207100,

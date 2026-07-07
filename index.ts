@@ -47,6 +47,8 @@ import {
 } from "./mode-change-command.js";
 import {
   buildModeColorizers,
+  buildOffBorderColor,
+  isNeutralBorder,
   type ModeColorizers,
   type ModeColorKey,
   resolveModeColors,
@@ -232,6 +234,18 @@ type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 type ModalEditorOptions = {
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
+  // Renders Pi's neutral "thinking off" border color. Used to detect when the
+  // host border is the resting default (safe to recolor) versus an active
+  // thinking level or another extension's highlight (leave untouched). When
+  // omitted, detection is disabled and the mode color is always applied.
+  offBorderColor?: ((s: string) => string) | null;
+  // Resolved per-mode tokens (config ?? MODE_COLORS default). Drives the
+  // precedence rule: a "borderMuted" token always wins, even when thinking is
+  // active; any other token defers to the thinking color while it is active.
+  modeColorTokens?: Partial<Record<ModeColorKey, string>>;
+  // Reverse-video transform applied to the label. When the label defers to the
+  // thinking color it is wrapped with this so it keeps its block styling.
+  labelTransform?: ((s: string) => string) | null;
 };
 
 export class ModalEditor extends CustomEditor {
@@ -271,6 +285,18 @@ export class ModalEditor extends CustomEditor {
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
+  private readonly offBorderColor: ((s: string) => string) | null;
+  // Latest host-assigned border color and whether it is the neutral resting
+  // default. Kept as mutable instance fields (not closure locals) so the label
+  // resolver can read the same thinking state the border uses.
+  private borderBase: ((s: string) => string) | null = null;
+  private borderBaseIsNeutral = true;
+  // Resolved per-mode tokens (config ?? default); the precedence check keys on
+  // the token, not the mode name, so "borderMuted" wins regardless of mode.
+  private modeColorTokens: Partial<Record<ModeColorKey, string>> = {};
+  // Reverse-video transform used by the label, so its defer-to-thinking branch
+  // matches the label's usual background-block styling.
+  private labelTransform: ((s: string) => string) | null = null;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
   private lastCursorShapeSequence: CursorShapeSequence | null = null;
   private lastLineCache = { l: "", w: 0, label: "", result: "" };
@@ -316,6 +342,9 @@ export class ModalEditor extends CustomEditor {
     this.cursorShapeRuntime = getCursorShapeRuntime(tui);
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
+    this.offBorderColor = opts?.offBorderColor ?? null;
+    this.modeColorTokens = opts?.modeColorTokens ?? {};
+    this.labelTransform = opts?.labelTransform ?? null;
     this.installModeBorderColorizer();
   }
 
@@ -377,19 +406,61 @@ export class ModalEditor extends CustomEditor {
     return "normal";
   }
 
+  /**
+   * Resolve a surface (border or label) color for the active mode under the
+   * precedence: borderMuted > thinking > (borderAccent | other).
+   *   - a borderMuted token always paints the mode color (muted wins, even
+   *     when thinking is ON);
+   *   - otherwise, thinking ON defers to the host's thinking color and
+   *     thinking OFF paints the mode color.
+   * `deferWrap` is identity for the border and reverse-video for the label, so
+   * a deferred thinking color inherits the surface's normal styling.
+   */
+  private resolveModeColor(
+    colorizers: ModeColorizers,
+    text: string,
+    deferWrap: (s: string) => string,
+  ): string {
+    const mode = this.getActiveMode();
+    const modeColorFn = colorizers[mode] ?? ((s: string) => s);
+    const token = this.modeColorTokens[mode];
+    if (token === "borderMuted" || this.borderBaseIsNeutral) {
+      return modeColorFn(text);
+    }
+    // Thinking is active and this mode is not muted: defer to the thinking
+    // color, wrapped the way this surface normally styles its text.
+    const thinking = this.borderBase ?? modeColorFn;
+    return deferWrap(thinking(text));
+  }
+
   private installModeBorderColorizer(): void {
     if (!this.borderColorizers) return;
-    let base = this.borderColor;
-    const modeBorderColor = (text: string) =>
-      (this.borderColorizers?.[this.getActiveMode()] ?? base)(text);
+    // Capture the values the getter/setter close over so the traps never
+    // depend on late `this` rebinding. The accessors themselves are arrow
+    // functions, so their `this` is this editor instance.
+    const borderColorizers = this.borderColorizers;
+    const offBorderColor = this.offBorderColor;
+    // Seed the instance fields from whatever the host assigned before the trap
+    // was installed (usually the inherited default border).
+    this.borderBase = this.borderColor;
+    this.borderBaseIsNeutral = isNeutralBorder(this.borderBase, offBorderColor);
+    const resolvedBorderColor = (text: string) =>
+      this.resolveModeColor(borderColorizers, text, (s) => s);
     // Pi assigns its default border color after extension editor construction.
     // Keep a mode-aware getter installed and treat later assignments as the
     // fallback/base color, otherwise syncBorderColorWithMode is overwritten in
-    // real sessions even though direct editor tests pass.
+    // real sessions even though direct editor tests pass. Reclassify on every
+    // host assignment so a thinking-level cycle off -> on -> off is honored.
     Object.defineProperty(this, "borderColor", {
-      get: () => modeBorderColor,
-      set(next: unknown) {
-        if (typeof next === "function") base = next as typeof base;
+      get: () => resolvedBorderColor,
+      set: (next: unknown) => {
+        if (typeof next === "function") {
+          this.borderBase = next as (s: string) => string;
+          this.borderBaseIsNeutral = isNeutralBorder(
+            this.borderBase,
+            offBorderColor,
+          );
+        }
       },
     });
   }
@@ -3937,7 +4008,10 @@ export class ModalEditor extends CustomEditor {
   }
 
   private getModeLabelColorizer(): ((s: string) => string) | null {
-    return this.labelColorizers?.[this.getActiveMode()] ?? null;
+    if (!this.labelColorizers) return null;
+    const labelColorizers = this.labelColorizers;
+    const wrap = this.labelTransform ?? ((s: string) => s);
+    return (s: string) => this.resolveModeColor(labelColorizers, s, wrap);
   }
 
   private getModeLabel(): string {
@@ -4000,10 +4074,15 @@ export default function (pi: ExtensionAPI) {
     const labelColorizers = t
       ? buildModeColorizers(t, modeColors, reverseVideo)
       : null;
+    const borderSync = piVimSettings.syncBorderColorWithMode;
     const borderColorizers =
-      t && piVimSettings.syncBorderColorWithMode === true
+      t && (borderSync === true || borderSync === "inherit")
         ? buildModeColorizers(t, modeColors)
         : null;
+    // `"inherit"` enables neutral-default detection; `true` leaves it off so
+    // the mode color is always applied (legacy unconditional behavior).
+    const offBorderColor =
+      t && borderSync === "inherit" ? buildOffBorderColor(t) : null;
     const modeChangeHandler = createModeChangeHandler(
       piVimSettings.modeChange,
       (event) => pi.events.emit("pi-vim:mode-change", event),
@@ -4013,6 +4092,9 @@ export default function (pi: ExtensionAPI) {
       const editor = new ModalEditor(tui, theme, kb, {
         labelColorizers,
         borderColorizers,
+        offBorderColor,
+        modeColorTokens: modeColors,
+        labelTransform: reverseVideo,
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());
