@@ -409,7 +409,7 @@ async function getClipboardHelperSourceWithMock(
   mockModuleSource: string,
 ): Promise<string> {
   const indexSource = await readFile(
-    new URL("../index.ts", import.meta.url),
+    new URL("../clipboard-mirror.ts", import.meta.url),
     "utf8",
   );
   const match = /const CLIPBOARD_HELPER_SOURCE = `([\s\S]*?)`;/.exec(
@@ -473,7 +473,7 @@ async function getClipboardReadHelperSourceWithMock(
   mockClipboardExpression: string,
 ): Promise<string> {
   const indexSource = await readFile(
-    new URL("../index.ts", import.meta.url),
+    new URL("../clipboard-mirror.ts", import.meta.url),
     "utf8",
   );
   const match = /const CLIPBOARD_READ_HELPER_SOURCE = `([\s\S]*?)`;/.exec(
