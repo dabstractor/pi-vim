@@ -11,11 +11,16 @@ export type ModeChangeSettings = {
   normal?: string;
 };
 
+export type BorderSyncMode = boolean | "inherit";
+
 export type PiVimSettings = {
   clipboardMirror?: unknown;
   modeColors?: ModeColorSettings;
   modeChange?: ModeChangeSettings;
-  syncBorderColorWithMode?: boolean;
+  // `false` (default) leaves Pi's border untouched; `true` always recolors per
+  // mode; `"inherit"` recolors only when the border is Pi's neutral "thinking
+  // off" color and otherwise defers to whatever the host is showing.
+  syncBorderColorWithMode?: BorderSyncMode;
 };
 
 const M = Symbol(),
@@ -82,15 +87,15 @@ export function readPiVimModeChange(g: unknown, p: unknown) {
   return modeChange(v);
 }
 
-export function readPiVimBooleanSetting(
+export function readPiVimBorderSyncSetting(
   g: unknown,
   p: unknown,
-  k: "syncBorderColorWithMode",
-) {
-  const v = get(p, k);
-  if (v !== M) return typeof v === "boolean" ? v : undefined;
-  const w = get(g, k);
-  return typeof w === "boolean" ? w : undefined;
+): BorderSyncMode | undefined {
+  const read = (v: unknown): BorderSyncMode | undefined =>
+    v === "inherit" || v === true || v === false ? v : undefined;
+  const v = get(p, "syncBorderColorWithMode");
+  if (v !== M) return read(v);
+  return read(get(g, "syncBorderColorWithMode"));
 }
 
 function disk(cwd: string): PiVimSettings {
@@ -101,11 +106,7 @@ function disk(cwd: string): PiVimSettings {
     clipboardMirror: readPiVimClipboardMirrorSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     modeChange: readPiVimModeChange(g, p),
-    syncBorderColorWithMode: readPiVimBooleanSetting(
-      g,
-      p,
-      "syncBorderColorWithMode",
-    ),
+    syncBorderColorWithMode: readPiVimBorderSyncSetting(g, p),
   };
 }
 

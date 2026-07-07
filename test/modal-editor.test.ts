@@ -18,7 +18,10 @@ import installPiVim, {
   setModeChangeCommandRunnerForTests,
 } from "../index.js";
 import type { WordMotionClass } from "../motions.js";
-import { setPiVimSettingsReaderForTests } from "../settings.js";
+import {
+  type ModeColorSettings,
+  setPiVimSettingsReaderForTests,
+} from "../settings.js";
 import type {
   WordMotionDirection,
   WordMotionTarget,
@@ -240,9 +243,10 @@ type InstalledExtension = {
   readonly sessionEndHandlerCount: number;
 };
 
-function createRecordingTheme(
-  rejectedTokens: readonly string[] = [],
-): Theme & { fgCalls: ThemeFgCall[] } {
+function createRecordingTheme(rejectedTokens: readonly string[] = []): Theme & {
+  fg: (token: string, text: string) => string;
+  fgCalls: ThemeFgCall[];
+} {
   const fgCalls: ThemeFgCall[] = [];
   const rejected = new Set(rejectedTokens);
   return {
@@ -256,7 +260,10 @@ function createRecordingTheme(
     },
     bold: (s: string) => s,
     fgCalls,
-  } as unknown as Theme & { fgCalls: ThemeFgCall[] };
+  } as unknown as Theme & {
+    fg: (token: string, text: string) => string;
+    fgCalls: ThemeFgCall[];
+  };
 }
 
 async function installExtensionWithEditorFactory(
@@ -317,6 +324,23 @@ async function installExtensionWithEditorFactory(
       return pi.handlersFor("session_end").length;
     },
   };
+}
+
+// Builds a ModalEditor with syncBorderColorWithMode: "inherit" and the
+// given per-mode color tokens. The settings reader is restored via the returned
+// `restore` (settings are read once at session_start and baked into the
+// factory closure, so construction is already finalized).
+async function createInheritBorderEditor(
+  theme: ReturnType<typeof createRecordingTheme>,
+  modeColors: ModeColorSettings,
+): Promise<{ editor: ModalEditor; restore: () => void }> {
+  const restore = setPiVimSettingsReaderForTests(() => ({
+    modeColors,
+    syncBorderColorWithMode: "inherit" as const,
+  }));
+  const extension = await installExtensionWithEditorFactory(theme);
+  const editor = extension.editorFactory(stubTui, stubTheme, stubKeybindings);
+  return { editor, restore };
 }
 
 function createSpawnErrno(message: string): Error {
@@ -1746,7 +1770,8 @@ describe("mode color settings", () => {
 
       // Pi's InteractiveMode.setCustomEditorComponent copies the default
       // editor's borderColor onto the extension editor after the factory
-      // returns. The mode-aware border hook must survive that assignment.
+      // returns. With `true` the mode color always wins, regardless of what the
+      // host assigned.
       editor.borderColor = defaultEditorBorderColor;
       assert.equal(
         editor.borderColor("border"),
@@ -1761,6 +1786,338 @@ describe("mode color settings", () => {
 
       sendKeys(editor, [":"]);
       assert.equal(editor.borderColor("border"), "<exToken>border</exToken>");
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit recolors the neutral default and follows mode transitions", async () => {
+    const theme = createRecordingTheme();
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeColors: {
+        insert: "insertToken",
+        normal: "normalToken",
+        ex: "exToken",
+      },
+      syncBorderColorWithMode: "inherit",
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      // Pi copies its default editor border (the "thinking off" color) onto
+      // the extension editor after the factory returns. That neutral border is
+      // the only state pi-vim may recolor, so simulate the host assignment here.
+      editor.borderColor = (text: string) => theme.fg("thinkingOff", text);
+
+      assert.equal(
+        editor.borderColor("border"),
+        "<insertToken>border</insertToken>",
+      );
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<normalToken>border</normalToken>",
+      );
+
+      sendKeys(editor, [":"]);
+      assert.equal(editor.borderColor("border"), "<exToken>border</exToken>");
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<normalToken>border</normalToken>",
+      );
+
+      sendKeys(editor, ["i"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<insertToken>border</insertToken>",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  for (const [levelName, token] of [
+    ["minimal", "thinkingMinimal"],
+    ["high", "thinkingHigh"],
+  ] as const) {
+    it(`syncBorderColorWithMode inherit defers to an active thinking level (${levelName})`, async () => {
+      const theme = createRecordingTheme();
+      const restore = setPiVimSettingsReaderForTests(() => ({
+        modeColors: {
+          insert: "insertToken",
+          normal: "normalToken",
+          ex: "exToken",
+        },
+        syncBorderColorWithMode: "inherit",
+      }));
+
+      try {
+        const extension = await installExtensionWithEditorFactory(theme);
+        const editor = extension.editorFactory(
+          stubTui,
+          stubTheme,
+          stubKeybindings,
+        );
+
+        // An active thinking level carries a signal pi-vim must not clobber, in
+        // any mode. `minimal` is the critical case: it is a neutral gray, so
+        // only an exact match against the "off" color (not a saturation test)
+        // can tell it apart from the resting default.
+        editor.borderColor = (text: string) => theme.fg(token, text);
+        assert.equal(
+          editor.borderColor("border"),
+          `<${token}>border</${token}>`,
+          `active ${levelName} border preserved in insert`,
+        );
+
+        sendKeys(editor, ["\x1b"]);
+        assert.equal(
+          editor.borderColor("border"),
+          `<${token}>border</${token}>`,
+          `active ${levelName} border preserved in normal`,
+        );
+      } finally {
+        restore();
+      }
+    });
+  }
+
+  it("syncBorderColorWithMode inherit defers to another extension's border highlight", async () => {
+    const theme = createRecordingTheme();
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeColors: {
+        insert: "insertToken",
+        normal: "normalToken",
+        ex: "exToken",
+      },
+      syncBorderColorWithMode: "inherit",
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+
+      // A third-party extension took over the border with its own highlight;
+      // anything that is not the neutral default is left untouched.
+      editor.borderColor = (text: string) => `<custom>${text}</custom>`;
+      assert.equal(editor.borderColor("border"), "<custom>border</custom>");
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit recolors when the host border returns to neutral", async () => {
+    const theme = createRecordingTheme();
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeColors: {
+        insert: "insertToken",
+        normal: "normalToken",
+        ex: "exToken",
+      },
+      syncBorderColorWithMode: "inherit",
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      const off = (text: string) => theme.fg("thinkingOff", text);
+      const high = (text: string) => theme.fg("thinkingHigh", text);
+
+      editor.borderColor = off;
+      assert.equal(
+        editor.borderColor("border"),
+        "<insertToken>border</insertToken>",
+        "neutral border recolored with the mode color",
+      );
+
+      editor.borderColor = high;
+      assert.equal(
+        editor.borderColor("border"),
+        "<thinkingHigh>border</thinkingHigh>",
+        "raised thinking level deferred to",
+      );
+
+      editor.borderColor = off;
+      assert.equal(
+        editor.borderColor("border"),
+        "<insertToken>border</insertToken>",
+        "returning to neutral re-applies the mode color",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit lets a borderMuted mode win over an active thinking level", async () => {
+    // The user's swapped config: insert is the accent mode, normal is muted.
+    // With thinking ON, the muted (normal) mode must still paint muted so the
+    // border visibly changes between modes (the primary complaint), while the
+    // accent (insert) mode still defers to the thinking color.
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      insert: "borderAccent",
+      normal: "borderMuted",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+
+      assert.equal(
+        editor.borderColor("border"),
+        "<thinkingMinimal>border</thinkingMinimal>",
+        "insert (accent) defers to the active thinking level",
+      );
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderMuted>border</borderMuted>",
+        "normal (muted) wins over the active thinking level",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit paints each mode's color when thinking is off", async () => {
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      insert: "borderAccent",
+      normal: "borderMuted",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingOff", text);
+
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderAccent>border</borderAccent>",
+        "insert (accent) paints its color when thinking is off",
+      );
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderMuted>border</borderMuted>",
+        "normal (muted) paints its color when thinking is off",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit precedence follows the token, not the mode name", async () => {
+    // Reversed config: insert is now muted, normal is the accent. The same
+    // rule must hold: whichever mode is muted wins, regardless of mode name.
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      insert: "borderMuted",
+      normal: "borderAccent",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderMuted>border</borderMuted>",
+        "insert (muted) wins over the active thinking level",
+      );
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<thinkingMinimal>border</thinkingMinimal>",
+        "normal (accent) defers to the active thinking level",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit label inherits the thinking color in a non-muted mode", async () => {
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      insert: "borderAccent",
+      normal: "borderMuted",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+
+      // Insert (accent) label defers: it is colored with the thinking token
+      // and reverse-video wrapped, so it keeps its block styling.
+      editor.render(80);
+      assert.equal(
+        theme.fgCalls.at(-1)?.token,
+        "thinkingMinimal",
+        "insert label inherits the thinking color",
+      );
+      assert.ok(
+        (editor.render(80).at(-1) ?? "").includes(
+          "\x1b[7m<thinkingMinimal> INSERT </thinkingMinimal>\x1b[27m",
+        ),
+        "insert label is reverse-video wrapped around the thinking color",
+      );
+
+      // Normal (muted) label wins: it stays muted, not the thinking color.
+      sendKeys(editor, ["\x1b"]);
+      theme.fgCalls.length = 0;
+      editor.render(80);
+      assert.equal(
+        theme.fgCalls.at(-1)?.token,
+        "borderMuted",
+        "normal label stays muted even with thinking on",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode true never defers to an active thinking level", async () => {
+    const theme = createRecordingTheme();
+    const restore = setPiVimSettingsReaderForTests(() => ({
+      modeColors: { insert: "borderAccent", normal: "borderMuted" },
+      syncBorderColorWithMode: true,
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderAccent>border</borderAccent>",
+        "legacy `true` always applies the mode color",
+      );
+
+      sendKeys(editor, ["\x1b"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderMuted>border</borderMuted>",
+        "legacy `true` has no thinking detection",
+      );
     } finally {
       restore();
     }

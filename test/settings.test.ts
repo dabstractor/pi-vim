@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  readPiVimBooleanSetting,
+  readPiVimBorderSyncSetting,
   readPiVimClipboardMirrorSetting,
   readPiVimModeChange,
   readPiVimModeColors,
@@ -127,85 +127,92 @@ describe("piVim mode color settings reader", () => {
   });
 });
 
-describe("piVim boolean settings reader", () => {
-  it("returns undefined when boolean setting is missing", () => {
+describe("piVim border sync settings reader", () => {
+  it("returns undefined when the setting is missing", () => {
+    assert.equal(readPiVimBorderSyncSetting(undefined, undefined), undefined);
     assert.equal(
-      readPiVimBooleanSetting(undefined, undefined, "syncBorderColorWithMode"),
-      undefined,
-    );
-    assert.equal(
-      readPiVimBooleanSetting(
-        { piVim: {} },
-        { piVim: {} },
-        "syncBorderColorWithMode",
-      ),
+      readPiVimBorderSyncSetting({ piVim: {} }, { piVim: {} }),
       undefined,
     );
   });
 
-  it("reads true and false boolean settings", () => {
+  it("reads true and false", () => {
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: true } },
         {},
-        "syncBorderColorWithMode",
       ),
       true,
     );
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: false } },
         {},
-        "syncBorderColorWithMode",
       ),
       false,
     );
   });
 
-  it("ignores invalid boolean settings", () => {
+  it("reads the inherit mode", () => {
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting(
+        { piVim: { syncBorderColorWithMode: "inherit" } },
+        {},
+      ),
+      "inherit",
+    );
+  });
+
+  it("ignores invalid values", () => {
+    assert.equal(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: "true" } },
         {},
-        "syncBorderColorWithMode",
       ),
       undefined,
     );
     assert.equal(
-      readPiVimBooleanSetting(
-        { piVim: { syncBorderColorWithMode: 1 } },
+      readPiVimBorderSyncSetting(
+        { piVim: { syncBorderColorWithMode: "always" } },
         {},
-        "syncBorderColorWithMode",
       ),
       undefined,
     );
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting({ piVim: { syncBorderColorWithMode: 1 } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: null } },
         {},
-        "syncBorderColorWithMode",
       ),
       undefined,
     );
   });
 
-  it("lets project boolean settings override global", () => {
+  it("lets project settings override global", () => {
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: true } },
         { piVim: { syncBorderColorWithMode: false } },
-        "syncBorderColorWithMode",
       ),
       false,
     );
+    assert.equal(
+      readPiVimBorderSyncSetting(
+        { piVim: { syncBorderColorWithMode: true } },
+        { piVim: { syncBorderColorWithMode: "inherit" } },
+      ),
+      "inherit",
+    );
   });
 
-  it("treats invalid project boolean settings as an override", () => {
+  it("treats invalid project settings as an override", () => {
     assert.equal(
-      readPiVimBooleanSetting(
+      readPiVimBorderSyncSetting(
         { piVim: { syncBorderColorWithMode: true } },
         { piVim: { syncBorderColorWithMode: "false" } },
-        "syncBorderColorWithMode",
       ),
       undefined,
     );
