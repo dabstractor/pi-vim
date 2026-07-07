@@ -168,6 +168,8 @@ Quit-only ex flows.
 | `:quit!` / `:qall!` / `:quitall!` | Long aliases with the same force quit policy as `:q!` |
 | unsupported `:{cmd}` | Show warning notification; no quit |
 
+Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. A newline inside a bracketed paste currently submits the pending command like a typed Enter (see `doc/dev/ex-paste-newline-policy.md` for the planned change).
+
 Insert-mode shortcuts (stay in Insert mode):
 
 | key | action |
