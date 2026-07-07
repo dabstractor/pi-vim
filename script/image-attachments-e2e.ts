@@ -1,10 +1,8 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import installPiVim from "../index.js";
 import type { stubKeybindings } from "../test/harness.js";
@@ -13,6 +11,15 @@ import {
   stubTheme,
   stubTui,
 } from "../test/harness.js";
+import {
+  findPackageRoot,
+  formatUnknownError,
+  hasPackageName,
+  isRecord,
+  packLocalPackage,
+  projectRoot,
+  runNpmInstall,
+} from "./consumer-workspace.js";
 
 type RuntimeEditorFactory = (
   tui: typeof stubTui,
@@ -136,167 +143,12 @@ const WRAPPER_FACING_FIELDS = [
   "borderColor",
 ] as const;
 
-const currentRequire = createRequire(import.meta.url);
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-function createNpmCommandEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.NPM_CONFIG_BEFORE;
-  delete env.npm_config_before;
-  delete env.NPM_CONFIG_MIN_RELEASE_AGE;
-  delete env.npm_config_min_release_age;
-  return env;
-}
-
-function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function formatUnknownError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
 function fail(message: string): never {
   throw new Error(message);
 }
 
 function crossPackageBlocker(message: string): never {
   throw new Error(`cross-package blocker: ${message}`);
-}
-
-function readPackageName(packageJsonPath: string): string | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as unknown;
-  } catch (error) {
-    throw new Error(
-      `FAIL-INFRA: unable to read or parse package.json at ${packageJsonPath}: ${formatUnknownError(error)}`,
-      { cause: error },
-    );
-  }
-
-  if (isRecord(parsed) && typeof parsed.name === "string") return parsed.name;
-  return null;
-}
-
-function hasPackageName(packageDir: string, expectedName: string): boolean {
-  const packageJsonPath = join(packageDir, "package.json");
-  return (
-    existsSync(packageJsonPath) &&
-    readPackageName(packageJsonPath) === expectedName
-  );
-}
-
-function findPackageRootInAncestorNodeModules(
-  specifier: string,
-): string | null {
-  let dir = projectRoot;
-
-  while (true) {
-    const nodeModulesCandidate = join(
-      dir,
-      "node_modules",
-      ...specifier.split("/"),
-    );
-    if (hasPackageName(nodeModulesCandidate, specifier))
-      return nodeModulesCandidate;
-
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  return null;
-}
-
-// npm keeps the peer's dependency tree nested under the peer itself in this
-// repo's lockfile, so @earendil-works/pi-ai lives inside pi-coding-agent's
-// node_modules rather than at the top level.
-function findPackageRootNestedInCodingAgent(specifier: string): string | null {
-  const hostSpecifier = "@earendil-works/pi-coding-agent";
-  if (specifier === hostSpecifier) return null;
-
-  const hostRoot = findPackageRootInAncestorNodeModules(hostSpecifier);
-  if (!hostRoot) return null;
-
-  const nestedCandidate = join(
-    hostRoot,
-    "node_modules",
-    ...specifier.split("/"),
-  );
-  return hasPackageName(nestedCandidate, specifier) ? nestedCandidate : null;
-}
-
-function findPackageRoot(specifier: string): string {
-  const ancestorNodeModulesPackage =
-    findPackageRootInAncestorNodeModules(specifier);
-  if (ancestorNodeModulesPackage) return ancestorNodeModulesPackage;
-
-  const codingAgentNestedPackage =
-    findPackageRootNestedInCodingAgent(specifier);
-  if (codingAgentNestedPackage) return codingAgentNestedPackage;
-
-  let dir: string;
-  try {
-    dir = dirname(currentRequire.resolve(specifier));
-  } catch (error) {
-    if (isRecord(error) && error.code === "MODULE_NOT_FOUND") {
-      throw new Error(
-        `FAIL-INFRA: unable to locate installed package root for ${specifier}`,
-      );
-    }
-    throw new Error(
-      `FAIL-INFRA: unable to resolve installed package root for ${specifier}: ${formatUnknownError(error)}`,
-      { cause: error },
-    );
-  }
-
-  while (true) {
-    const packageJsonPath = join(dir, "package.json");
-    if (
-      existsSync(packageJsonPath) &&
-      readPackageName(packageJsonPath) === specifier
-    ) {
-      return dir;
-    }
-
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  throw new Error(
-    `FAIL-INFRA: unable to locate installed package root for ${specifier}`,
-  );
-}
-
-function packLocalImageAttachments(
-  packageDir: string,
-  workspace: string,
-): string {
-  try {
-    const output = execFileSync(
-      "npm",
-      ["pack", packageDir, "--pack-destination", workspace],
-      {
-        cwd: workspace,
-        encoding: "utf8",
-        env: {
-          ...createNpmCommandEnv(),
-          npm_config_ignore_scripts: "true",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    ).trim();
-    const tarballName = output.split("\n").filter(Boolean).at(-1);
-    if (!tarballName) throw new Error("npm pack did not report a tarball name");
-    return `file:${join(workspace, tarballName)}`;
-  } catch (error) {
-    throw new Error(
-      `FAIL-INFRA: unable to pack ${IMAGE_PACKAGE_NAME}: ${formatUnknownError(error)}`,
-    );
-  }
 }
 
 function resolveImageAttachmentsDependency(workspace: string): string {
@@ -308,7 +160,7 @@ function resolveImageAttachmentsDependency(workspace: string): string {
         `FAIL-INFRA: PI_IMAGE_ATTACHMENTS_PACKAGE_DIR does not point to ${IMAGE_PACKAGE_NAME}: ${packageDir}`,
       );
     }
-    return packLocalImageAttachments(packageDir, workspace);
+    return packLocalPackage(packageDir, workspace, IMAGE_PACKAGE_NAME);
   }
 
   const candidates = new Set<string>();
@@ -325,35 +177,11 @@ function resolveImageAttachmentsDependency(workspace: string): string {
 
   for (const candidate of candidates) {
     if (hasPackageName(candidate, IMAGE_PACKAGE_NAME)) {
-      return packLocalImageAttachments(candidate, workspace);
+      return packLocalPackage(candidate, workspace, IMAGE_PACKAGE_NAME);
     }
   }
 
   return IMAGE_PACKAGE_REGISTRY_RANGE;
-}
-
-function runNpmInstall(workspace: string): void {
-  try {
-    execFileSync("npm", ["install", "--ignore-scripts"], {
-      cwd: workspace,
-      encoding: "utf8",
-      env: {
-        ...createNpmCommandEnv(),
-        npm_config_audit: "false",
-        npm_config_fund: "false",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    const output = isRecord(error)
-      ? [error.stdout, error.stderr]
-          .filter((value): value is string => typeof value === "string")
-          .join("\n")
-      : "";
-    throw new Error(
-      `FAIL-INFRA: npm install --ignore-scripts failed${output ? `\n${output}` : ""}`,
-    );
-  }
 }
 
 async function createWorkspace(): Promise<string> {
