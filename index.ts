@@ -540,7 +540,9 @@ class ClipboardMirror {
       createClipboardAbortError("clipboard writer replaced"),
     );
     this.writeFn = writeFn;
-    this.lastWriteFailedFlag = false;
+    // Deliberately keep lastWriteFailedFlag: swapping the writer does not
+    // change whether the OS clipboard is stale relative to the register;
+    // only a landed mirror write clears the flag.
     resetClipboardCircuitBreaker();
   }
 

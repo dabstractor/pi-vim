@@ -230,6 +230,48 @@ describe("clipboard mirror policy", () => {
     }
   });
 
+  it("replacing the writer after a failed mirror keeps put on the register", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    try {
+      editor.setClipboardFn(async () => {
+        throw new Error("clipboard backend failed");
+      });
+      editor.setClipboardReadFn(() => "SYS");
+
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+
+      editor.setClipboardFn(async () => {});
+      sendKeys(editor, ["P"]);
+
+      assert.equal(editor.getText(), "foo foo bar");
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("a successful mirror through a replaced writer restores clipboard reads", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    try {
+      editor.setClipboardFn(async () => {
+        throw new Error("clipboard backend failed");
+      });
+      editor.setClipboardReadFn(() => "SYS");
+
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+
+      editor.setClipboardFn(async () => {});
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+      sendKeys(editor, ["P"]);
+
+      assert.equal(editor.getText(), "SYSfoo bar");
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
+
   it("a later successful mirror restores clipboard reads for put", async () => {
     const { editor } = createEditorWithSpy("foo bar");
     let failWrites = true;
