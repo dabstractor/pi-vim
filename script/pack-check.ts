@@ -64,12 +64,15 @@ const FORBIDDEN_REGEX_BY_GLOB: Record<
 };
 
 const THRESHOLDS = {
-  maxFiles: 12,
-  // WORD/delimited text objects, mode-color settings, matching-pair motion,
-  // render caching, and mode-change hooks add package surface. Keep budgets
-  // tight enough to catch accidental docs/tests in the package.
-  maxSize: 35000,
-  maxUnpackedSize: 150000,
+  // Issue #32 modularization: index.ts module-level subsystems move into
+  // sibling modules (cursor-shape, mode-colors, mode-change-command,
+  // clipboard-mirror), raising the packed file count 10 -> 14 and adding
+  // import/export boilerplate (~2 KB unpacked, measured). Same code
+  // otherwise. Keep budgets tight enough to catch accidental docs/tests
+  // in the package.
+  maxFiles: 16,
+  maxSize: 35500,
+  maxUnpackedSize: 153000,
 } as const;
 
 function compareStrings(a: string, b: string): number {
