@@ -28,6 +28,11 @@ import {
   stripSoftwareCursorAfterMarker,
 } from "./cursor-shape.js";
 import {
+  cancelModeChangeCommands,
+  createModeChangeHandler,
+  setModeChangeCommandRunnerForTests,
+} from "./mode-change-command.js";
+import {
   buildModeColorizers,
   type ModeColorizers,
   resolveModeColors,
@@ -40,7 +45,7 @@ import {
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
-import { type ModeChangeSettings, readPiVimSettings } from "./settings.js";
+import { readPiVimSettings } from "./settings.js";
 import {
   resolveDelimitedTextObjectRange,
   resolveMatchingPairMotionTarget,
@@ -76,6 +81,8 @@ import {
   type WordMotionTarget,
 } from "./word-boundary-cache.js";
 
+export { setModeChangeCommandRunnerForTests };
+
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
@@ -85,7 +92,6 @@ const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
 const CLIPBOARD_SPAWN_FAILURE_LIMIT = 3;
 const CLIPBOARD_READ_TIMEOUT_MS = 750;
 const CLIPBOARD_READ_MAX_BUFFER_BYTES = 1024 * 1024;
-const MODE_CHANGE_COMMAND_TIMEOUT_MS = 2000;
 
 type EditorSnapshot = {
   text: string;
@@ -109,12 +115,6 @@ type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 type ClipboardWriteFn = (text: string, signal: AbortSignal) => Promise<void>;
 type ClipboardReadFn = () => string | null;
 type ClipboardProcess = ReturnType<typeof spawn>;
-type ModeChangeCommandRunner = (command: string) => void;
-type RunningModeChangeCommand = {
-  child: ReturnType<typeof spawn>;
-  timeout: ReturnType<typeof setTimeout>;
-};
-type ModeChangeEvent = { mode: Mode; previousMode: Mode };
 
 type ModalEditorOptions = {
   labelColorizers?: ModeColorizers | null;
@@ -3284,113 +3284,6 @@ export class ModalEditor extends CustomEditor {
     if (count) return ` NORMAL ${count}_ `;
     return " NORMAL ";
   }
-}
-
-let activeModeChangeCommand: RunningModeChangeCommand | null = null;
-let pendingModeChangeCommand: string | null = null;
-let modeChangeCommandRunner: ModeChangeCommandRunner = spawnModeChangeCommand;
-
-export function setModeChangeCommandRunnerForTests(
-  next: ModeChangeCommandRunner,
-): () => void {
-  const prev = modeChangeCommandRunner;
-  modeChangeCommandRunner = next;
-  return () => {
-    modeChangeCommandRunner = prev;
-  };
-}
-
-function spawnModeChangeCommand(command: string): void {
-  if (!command) return;
-  if (activeModeChangeCommand) {
-    pendingModeChangeCommand = command;
-    return;
-  }
-
-  startModeChangeCommand(command);
-}
-
-function startModeChangeCommand(command: string): void {
-  let child: ReturnType<typeof spawn>;
-  try {
-    child = spawn(command, {
-      shell: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-  } catch {
-    // spawn rejected synchronously (e.g., EMFILE) — never break the editor
-    runPendingModeChangeCommand();
-    return;
-  }
-
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    clearTimeout(timeout);
-    if (activeModeChangeCommand?.child !== child) return;
-    activeModeChangeCommand = null;
-    runPendingModeChangeCommand();
-  };
-  const timeout = setTimeout(() => {
-    try {
-      child.kill();
-    } catch {
-      // best effort timeout cleanup
-    }
-    finish();
-  }, MODE_CHANGE_COMMAND_TIMEOUT_MS);
-  timeout.unref?.();
-
-  activeModeChangeCommand = { child, timeout };
-  child.once("error", finish);
-  child.once("close", finish);
-}
-
-function runPendingModeChangeCommand(): void {
-  const pending = pendingModeChangeCommand;
-  pendingModeChangeCommand = null;
-  if (pending) startModeChangeCommand(pending);
-}
-
-function clearPendingModeChangeCommand(): void {
-  pendingModeChangeCommand = null;
-}
-
-function cancelModeChangeCommands(): void {
-  pendingModeChangeCommand = null;
-  const active = activeModeChangeCommand;
-  activeModeChangeCommand = null;
-  if (!active) return;
-  clearTimeout(active.timeout);
-  try {
-    active.child.kill();
-  } catch {
-    // best effort session cleanup
-  }
-}
-
-function createModeChangeHandler(
-  modeChange: ModeChangeSettings | undefined,
-  emitModeChange: (event: ModeChangeEvent) => void,
-): (mode: Mode, prevMode: Mode) => void {
-  const insert = modeChange?.insert;
-  const normal = modeChange?.normal;
-  return (mode, previousMode) => {
-    try {
-      emitModeChange({ mode, previousMode });
-    } catch {
-      // Subscribers must not break editing or configured mode-change commands.
-    }
-
-    const command = mode === "insert" ? insert : normal;
-    if (command) {
-      modeChangeCommandRunner(command);
-    } else {
-      clearPendingModeChangeCommand();
-    }
-  };
 }
 
 export default function (pi: ExtensionAPI) {
