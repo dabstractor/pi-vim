@@ -164,6 +164,8 @@ Quit-only ex flows.
 | `:q!` | Force quit the current Pi session even when the prompt has text |
 | `:qa` | Same safe quit policy as `:q` |
 | `:qa!` | Same force quit policy as `:q!` |
+| `:quit` / `:qall` / `:quitall` | Long aliases with the same safe quit policy as `:q` |
+| `:quit!` / `:qall!` / `:quitall!` | Long aliases with the same force quit policy as `:q!` |
 | unsupported `:{cmd}` | Show warning notification; no quit |
 
 Insert-mode shortcuts (stay in Insert mode):
@@ -364,7 +366,7 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, mixed-delimiter validation, or Visual `%` yet | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Registers / macros / search | Not implemented | Supported |
-| Ex commands | Quit-only EX mini-mode (`:q`, `:q!`, `:qa`, `:qa!`) | Full ex command-line surface |
+| Ex commands | Quit-only EX mini-mode (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms) | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---

@@ -1311,6 +1311,57 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
+  for (const alias of ["quit", "qall", "quitall"]) {
+    it(`:${alias} refuses to quit when prompt has non-whitespace text`, () => {
+      const session = createEditorWithSpy("hello");
+
+      sendKeys(session.editor, [":", ...alias, "\r"]);
+
+      assert.equal(session.quitCalls, 0);
+      assert.equal(session.editor.getText(), "hello");
+      assert.deepEqual(session.notifications, [
+        `Prompt is not empty; use :${alias}! to quit anyway`,
+      ]);
+    });
+
+    it(`:${alias} requests quit when prompt is empty`, () => {
+      const session = createEditorWithSpy("");
+
+      sendKeys(session.editor, [":", ...alias, "\r"]);
+
+      assert.equal(session.quitCalls, 1);
+      assert.deepEqual(session.notifications, []);
+    });
+
+    it(`:${alias}! requests quit when prompt has non-whitespace text`, () => {
+      const session = createEditorWithSpy("hello");
+
+      sendKeys(session.editor, [":", ...alias, "!", "\r"]);
+
+      assert.equal(session.quitCalls, 1);
+      assert.equal(session.editor.getText(), "hello");
+      assert.deepEqual(session.notifications, []);
+    });
+  }
+
+  it("unlisted quit abbreviations stay unsupported", () => {
+    const session = createEditorWithSpy("");
+
+    sendKeys(session.editor, [":", ..."quita", "\r"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :quita"]);
+  });
+
+  it(":! alone stays unsupported", () => {
+    const session = createEditorWithSpy("");
+
+    sendKeys(session.editor, [":", "!", "\r"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :!"]);
+  });
+
   it("escape cancels ex mini-mode", () => {
     const session = createEditorWithSpy("hello");
 

@@ -1385,21 +1385,27 @@ export class ModalEditor extends CustomEditor {
     return this.getText().trim().length > 0;
   }
 
+  private static readonly EX_QUIT_NAMES = new Set([
+    "q",
+    "qa",
+    "quit",
+    "qall",
+    "quitall",
+  ]);
+
   private submitPendingExCommand(): void {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
     this.clearPendingExCommand();
 
-    if (command === "q" || command === "qa") {
-      if (this.hasNonEmptyPrompt()) {
+    const force = command.endsWith("!");
+    const name = force ? command.slice(0, -1) : command;
+
+    if (ModalEditor.EX_QUIT_NAMES.has(name)) {
+      if (!force && this.hasNonEmptyPrompt()) {
         this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
         return;
       }
 
-      this.quitFn();
-      return;
-    }
-
-    if (command === "q!" || command === "qa!") {
       this.quitFn();
       return;
     }
