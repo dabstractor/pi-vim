@@ -12,6 +12,13 @@ async function nextClipboardDrain(): Promise<void> {
   await nextImmediate();
 }
 
+function createSpawnErrno(message: string): Error {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = "ENOENT";
+  error.syscall = "spawn clipboard-helper";
+  return error;
+}
+
 describe("clipboard mirror policy", () => {
   it("all clipboard mirror policy mirrors mutation and yank writes", async () => {
     const { editor, clipboardWrites } = createEditorWithSpy("foo bar");
@@ -146,6 +153,125 @@ describe("clipboard mirror policy", () => {
       assert.deepEqual(clipboardWrites, scenario.expectedClipboardWrites);
     });
   }
+
+  for (const scenario of [
+    {
+      label: "put prefers the register after a failed mirror write",
+      failure: () => new Error("clipboard backend failed"),
+    },
+    {
+      label: "put prefers the register after a spawn-classified mirror failure",
+      failure: () => createSpawnErrno("spawn failed"),
+    },
+  ]) {
+    it(scenario.label, async () => {
+      const { editor } = createEditorWithSpy("foo bar");
+      try {
+        editor.setClipboardFn(async () => {
+          throw scenario.failure();
+        });
+        editor.setClipboardReadFn(() => "SYS");
+
+        sendKeys(editor, ["y", "w"]);
+        await nextClipboardDrain();
+        sendKeys(editor, ["P"]);
+
+        assert.equal(editor.getText(), "foo foo bar");
+        assert.equal(editor.getRegister(), "foo ");
+      } finally {
+        editor.setClipboardFn(() => {});
+      }
+    });
+  }
+
+  it("put prefers the register when the circuit breaker has disabled mirroring", async () => {
+    const first = createEditorWithSpy("one two three four");
+    const second = createEditorWithSpy("foo bar");
+
+    try {
+      const failSpawn = async () => {
+        throw createSpawnErrno("spawn failed");
+      };
+      first.editor.setClipboardFn(failSpawn);
+      second.editor.setClipboardFn(failSpawn);
+      second.editor.setClipboardReadFn(() => "SYS");
+
+      for (let i = 0; i < 3; i++) {
+        sendKeys(first.editor, ["d", "w"]);
+        await nextClipboardDrain();
+      }
+
+      sendKeys(second.editor, ["y", "w"]);
+      await nextClipboardDrain();
+      sendKeys(second.editor, ["P"]);
+
+      assert.equal(second.editor.getText(), "foo foo bar");
+      assert.equal(second.editor.getRegister(), "foo ");
+    } finally {
+      first.editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("put pastes the register when the mirror failed and the OS clipboard is empty", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    try {
+      editor.setClipboardFn(async () => {
+        throw new Error("clipboard backend failed");
+      });
+      editor.setClipboardReadFn(() => "");
+
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+      sendKeys(editor, ["P"]);
+
+      assert.equal(editor.getText(), "foo foo bar");
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("a later successful mirror restores clipboard reads for put", async () => {
+    const { editor } = createEditorWithSpy("foo bar");
+    let failWrites = true;
+    try {
+      editor.setClipboardFn(async () => {
+        if (failWrites) throw new Error("clipboard backend failed");
+      });
+      editor.setClipboardReadFn(() => "SYS");
+
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+      failWrites = false;
+      sendKeys(editor, ["y", "w"]);
+      await nextClipboardDrain();
+      sendKeys(editor, ["P"]);
+
+      assert.equal(editor.getText(), "SYSfoo bar");
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
+
+  it("an empty register write is not pinned to the register after a failed mirror write", async () => {
+    const { editor } = createEditorWithSpy("ab");
+    try {
+      editor.setClipboardFn(async () => {
+        throw new Error("clipboard backend failed");
+      });
+      editor.setClipboardReadFn(() => "SYS");
+
+      sendKeys(editor, ["y", "y"]);
+      await nextClipboardDrain();
+
+      setInternalCursor(editor, 2);
+      sendKeys(editor, ["D", "p"]);
+
+      assert.equal(editor.getText(), "abSYS");
+      assert.equal(editor.getRegister(), "");
+    } finally {
+      editor.setClipboardFn(() => {});
+    }
+  });
 
   for (const policy of ["all", "yank", "never"] as const) {
     it(`${policy} clipboard mirror policy keeps empty no-op writes from pinning put to the register`, () => {

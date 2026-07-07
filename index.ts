@@ -319,6 +319,7 @@ function isClipboardEnvironmentFailure(error: unknown): boolean {
 const PI_CODING_AGENT_MODULE_URL = import.meta.resolve(
   "@earendil-works/pi-coding-agent",
 );
+const CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE = 2;
 const CLIPBOARD_HELPER_SOURCE = `
 import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
 
@@ -329,7 +330,9 @@ for await (const chunk of process.stdin) {
 
 try {
   await Promise.resolve(copyToClipboard(Buffer.concat(chunks).toString("utf8")));
-} catch {}
+} catch {
+  process.exitCode = ${CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE};
+}
 `;
 
 const CLIPBOARD_READ_HELPER_SOURCE = `
@@ -477,6 +480,14 @@ function writeClipboardInChildProcess(
         return;
       }
 
+      // Exit code 2 means the helper ran but the copy itself failed; that is
+      // a clipboard-backend failure, not an environment failure, so it must
+      // not count toward the spawn circuit breaker.
+      if (code === CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE) {
+        finish(new Error("clipboard helper reported a failed copy"));
+        return;
+      }
+
       finish(
         new ClipboardSpawnError(
           `clipboard helper failed with exit code ${code ?? "null"}`,
@@ -516,6 +527,7 @@ class ClipboardMirror {
   private activeText: string | null = null;
   private draining = false;
   private pendingText: string | null = null;
+  private lastWriteFailedFlag = false;
 
   constructor(
     private writeFn: ClipboardWriteFn,
@@ -528,6 +540,7 @@ class ClipboardMirror {
       createClipboardAbortError("clipboard writer replaced"),
     );
     this.writeFn = writeFn;
+    this.lastWriteFailedFlag = false;
     resetClipboardCircuitBreaker();
   }
 
@@ -541,8 +554,15 @@ class ClipboardMirror {
     );
   }
 
+  lastWriteFailed(): boolean {
+    return this.lastWriteFailedFlag;
+  }
+
   mirror(text: string): void {
-    if (this.circuitBreaker.disabled) return;
+    if (this.circuitBreaker.disabled) {
+      this.lastWriteFailedFlag = true;
+      return;
+    }
 
     this.pendingText = text;
 
@@ -566,6 +586,7 @@ class ClipboardMirror {
         try {
           await this.writeWithTimeout(text, controller);
           this.circuitBreaker.consecutiveEnvironmentFailures = 0;
+          this.lastWriteFailedFlag = false;
         } catch (error) {
           this.recordWriteFailure(error);
         } finally {
@@ -576,8 +597,9 @@ class ClipboardMirror {
         }
       }
 
-      if (this.circuitBreaker.disabled) {
+      if (this.circuitBreaker.disabled && this.pendingText !== null) {
         this.pendingText = null;
+        this.lastWriteFailedFlag = true;
       }
     } finally {
       this.draining = false;
@@ -588,6 +610,7 @@ class ClipboardMirror {
   }
 
   private recordWriteFailure(error: unknown): void {
+    this.lastWriteFailedFlag = true;
     if (!isClipboardEnvironmentFailure(error)) {
       this.circuitBreaker.consecutiveEnvironmentFailures = 0;
       return;
@@ -3170,7 +3193,13 @@ export class ModalEditor extends CustomEditor {
   private static readonly PUT_SIZE_LIMIT = 512 * 1024; // 512 KB safety cap
 
   private getPasteRegisterText(): string {
-    if (this.preferRegisterForPut || this.clipboardMirror.hasPendingWrite()) {
+    // A failed or skipped mirror leaves the OS clipboard stale relative to
+    // the register, so the register must win until a mirror lands again.
+    if (
+      this.preferRegisterForPut ||
+      this.clipboardMirror.hasPendingWrite() ||
+      (this.unnamedRegister !== "" && this.clipboardMirror.lastWriteFailed())
+    ) {
       return this.unnamedRegister;
     }
 

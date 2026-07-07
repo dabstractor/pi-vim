@@ -434,10 +434,16 @@ async function getClipboardHelperSourceWithMock(
     "clipboard helper import not found",
   );
 
-  const mockedSource = helperSource.replace(
-    helperImportLine,
-    replacementImportLine,
+  // The template body is raw source here, so runtime interpolations must be
+  // substituted the same way index.ts would; keep this list in step with
+  // CLIPBOARD_HELPER_SOURCE.
+  const exitCodeToken = ["$", "{CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE}"].join(
+    "",
   );
+
+  const mockedSource = helperSource
+    .replace(helperImportLine, replacementImportLine)
+    .replace(exitCodeToken, "2");
 
   assert.notEqual(
     mockedSource,
@@ -453,6 +459,11 @@ async function getClipboardHelperSourceWithMock(
     mockedSource.includes(replacementImportLine),
     true,
     "mock clipboard import missing",
+  );
+  assert.equal(
+    mockedSource.includes(exitCodeToken),
+    false,
+    "copy-failed exit code interpolation was not substituted",
   );
 
   return mockedSource;
@@ -2111,12 +2122,28 @@ describe("delete operator — dw / de / db / d$ / d0 / dd", () => {
     assert.deepEqual(rejections, []);
   });
 
-  it("clipboard helper treats Pi copyToClipboard throws as best-effort", async () => {
+  it("clipboard helper reports Pi copyToClipboard throws via exit code 2", async () => {
     const helperSource = await getClipboardHelperSourceWithMock(
       [
         "export function copyToClipboard(text) {",
         '  process.stdout.write("copy:" + text);',
         '  throw new Error("clipboard backend failed");',
+        "}",
+      ].join("\n"),
+    );
+
+    const result = await runClipboardHelperSource(helperSource, "payload");
+
+    assert.equal(result.code, 2, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, "copy:payload");
+  });
+
+  it("clipboard helper exits 0 when Pi copyToClipboard succeeds", async () => {
+    const helperSource = await getClipboardHelperSourceWithMock(
+      [
+        "export function copyToClipboard(text) {",
+        '  process.stdout.write("copy:" + text);',
         "}",
       ].join("\n"),
     );
