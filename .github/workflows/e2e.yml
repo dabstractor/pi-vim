@@ -1,0 +1,25 @@
+name: e2e
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+jobs:
+  # Composes pi-vim with the third-party image-attachments extension.
+  # Runs against the extension's GitHub main: the published 0.1.1 tarball
+  # imports getEditorKeybindings from @mariozechner/pi-tui, which its
+  # registry-resolvable peers never shipped, so it fails at import.
+  image-attachments:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: jordyvandomselaar/pi-image-attachments
+          path: .e2e/pi-image-attachments
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run test:e2e
+        env:
+          PI_IMAGE_ATTACHMENTS_PACKAGE_DIR: ${{ github.workspace }}/.e2e/pi-image-attachments

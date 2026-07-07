@@ -210,10 +210,32 @@ function findPackageRootInAncestorNodeModules(
   return null;
 }
 
+// npm keeps the peer's dependency tree nested under the peer itself in this
+// repo's lockfile, so @earendil-works/pi-ai lives inside pi-coding-agent's
+// node_modules rather than at the top level.
+function findPackageRootNestedInCodingAgent(specifier: string): string | null {
+  const hostSpecifier = "@earendil-works/pi-coding-agent";
+  if (specifier === hostSpecifier) return null;
+
+  const hostRoot = findPackageRootInAncestorNodeModules(hostSpecifier);
+  if (!hostRoot) return null;
+
+  const nestedCandidate = join(
+    hostRoot,
+    "node_modules",
+    ...specifier.split("/"),
+  );
+  return hasPackageName(nestedCandidate, specifier) ? nestedCandidate : null;
+}
+
 function findPackageRoot(specifier: string): string {
   const ancestorNodeModulesPackage =
     findPackageRootInAncestorNodeModules(specifier);
   if (ancestorNodeModulesPackage) return ancestorNodeModulesPackage;
+
+  const codingAgentNestedPackage =
+    findPackageRootNestedInCodingAgent(specifier);
+  if (codingAgentNestedPackage) return codingAgentNestedPackage;
 
   let dir: string;
   try {
