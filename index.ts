@@ -1292,7 +1292,13 @@ export class ModalEditor extends CustomEditor {
       !this.replaying &&
       this.mode !== "insert" &&
       this.pendingExCommand === null &&
-      data === "."
+      data === "." &&
+      // "." is the target/replacement char for a pending char-find (f/F/t/T,
+      // incl. as an operator motion like df.) or replace (r.), so it must reach
+      // dispatchInput as an argument, not trigger dot-repeat. Other pending
+      // commands (d/c/y, g, text objects) treat "." as invalid and cancel below.
+      !this.pendingMotion &&
+      !this.pendingReplace
     ) {
       // Dot-repeat. Vim discards "." when a command is already in progress
       // (e.g. "d ." or "g ."), so check that before consuming the count.

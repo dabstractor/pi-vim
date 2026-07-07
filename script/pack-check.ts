@@ -66,10 +66,10 @@ const FORBIDDEN_REGEX_BY_GLOB: Record<
 const THRESHOLDS = {
   maxFiles: 12,
   // WORD/delimited text objects, mode-color settings, matching-pair motion,
-  // render caching, mode-change hooks, and dot-repeat recording add package
-  // surface. Keep budgets tight enough to catch accidental docs/tests in the
-  // package.
-  maxSize: 37000,
+  // render caching, mode-change hooks, dot-repeat recording (insert-mode
+  // capture + char-argument '.' interception) add package surface. Keep
+  // budgets tight enough to catch accidental docs/tests in the package.
+  maxSize: 37200,
   maxUnpackedSize: 160000,
 } as const;
 

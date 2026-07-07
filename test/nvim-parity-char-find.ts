@@ -72,6 +72,28 @@ const CHAR_FIND_FINAL_STATE_CASES: NvimParityCase[] = [
     initial: { text: "axbxcxd", cursor: { line: 0, col: 0 } },
     keys: ["t", "x", ";"],
   },
+  // '.' as a char-find target must reach dispatchInput as an argument, not be
+  // swallowed by the dot-repeat interception.
+  {
+    name: "f. finds the next period (not dot-repeat)",
+    initial: { text: "ab.cd.ef", cursor: { line: 0, col: 0 } },
+    keys: ["f", "."],
+  },
+  {
+    name: "F. finds the previous period",
+    initial: { text: "ab.cd.ef", cursor: { line: 0, col: 5 } },
+    keys: ["F", "."],
+  },
+  {
+    name: "t. moves to before the next period",
+    initial: { text: "ab.cd.ef", cursor: { line: 0, col: 0 } },
+    keys: ["t", "."],
+  },
+  {
+    name: "df. deletes up to the next period",
+    initial: { text: "ab.cd.ef", cursor: { line: 0, col: 0 } },
+    keys: ["d", "f", "."],
+  },
 ];
 
 describe("nvim parity char-find motions", () => {
