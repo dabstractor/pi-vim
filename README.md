@@ -81,7 +81,7 @@ npm run hooks:install
 
 ## stats
 
-- **192 commands**: motions, operators, counts, text objects, undo/redo, ex quit
+- **193 commands**: motions, operators, counts, text objects, undo/redo, repeat, ex quit
 - **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
 - **0 dependencies**
 
@@ -330,7 +330,7 @@ Put reads the OS clipboard first unless the last local register write was not mi
 
 ---
 
-### undo / redo
+### undo / redo / repeat
 
 | key | action |
 |-----|--------|
@@ -339,6 +339,10 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `Ctrl+_` | Undo in normal mode (alias for `u`) |
 | `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
 | `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
+| `.` | Repeat the last repeatable normal-mode edit/change (for example `x`, `dw`, `cw...Esc`, `p`, `J`, insert entries like `i...Esc`) |
+| `{count}.` | Repeat the last change with `{count}` replacing the stored command count |
+
+Repeat tracks changes only; motions and yanks do not replace the previous repeatable change. Plain `.` preserves the original command count; `{count}.` uses the new count for that replay.
 
 ---
 
@@ -387,7 +391,7 @@ Explicitly deferred:
 - Delimited-object counts (`d2i"`, `2ci(`, `y2a{`)
 - Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
 - Ex surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
-- Search (`/`, `?`, `n`, `N`), repeat (`.`)
+- Search (`/`, `?`, `n`, `N`)
 - Replace mode (`R`) — only `r{char}` is supported
 - Count prefix beyond currently supported motions, including `{count}%` percent-of-file jumps
 - No insert-mode `<C-r>` expansion, no cross-session redo persistence

@@ -1840,7 +1840,7 @@ describe("mode color settings", () => {
     ["s", ["s"]],
     ["cc", ["c", "c"]],
     ["cw", ["c", "w"]],
-    ["ct space", ["c", "t", " "]],
+    ["ct space", ["0", "c", "t", " "]],
   ] as const) {
     it(`border updates for mode-changing commands: ${name}`, () => {
       assertInsertBorderAfterModeChangingCommand("alpha beta", [
@@ -4561,6 +4561,159 @@ describe("single-key edits — x / s / S / D / C", () => {
     assert.equal(editor.getRegister(), "hello world");
     assert.equal(editor.getText(), "");
     assert.equal(editor.getMode(), "insert");
+  });
+});
+
+describe("dot repeat — .", () => {
+  it("repeats the last single-key normal-mode edit", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["x", "."]);
+
+    assert.equal(editor.getText(), "cd");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("replays the original command count when repeating a counted edit", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "x", "."]);
+
+    assert.equal(editor.getText(), "ef");
+    assert.equal(editor.getRegister(), "cd");
+  });
+
+  it("uses a count before . to replace the stored command count", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["2", "x", "3", "."]);
+
+    assert.equal(editor.getText(), "f");
+    assert.equal(editor.getRegister(), "cde");
+  });
+
+  it("uses a count before . to replace operator counts", () => {
+    const { editor } = createEditorWithSpy("one two three four five six seven");
+
+    sendKeys(editor, ["2", "d", "w", "3", "."]);
+
+    assert.equal(editor.getText(), "six seven");
+    assert.equal(editor.getRegister(), "three four five ");
+  });
+
+  it("uses a count before . to replace motion counts after operators", () => {
+    const { editor } = createEditorWithSpy("one two three four five six seven");
+
+    sendKeys(editor, ["d", "2", "w", "3", "."]);
+
+    assert.equal(editor.getText(), "six seven");
+    assert.equal(editor.getRegister(), "three four five ");
+  });
+
+  it("repeats operator-pending changes including their motions", () => {
+    const { editor } = createEditorWithSpy("one two three");
+
+    sendKeys(editor, ["d", "w", "."]);
+
+    assert.equal(editor.getText(), "three");
+    assert.equal(editor.getRegister(), "two ");
+  });
+
+  it("repeats text-object deletes", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["d", "i", "w", "."]);
+
+    assert.equal(editor.getText(), "  baz");
+    assert.equal(editor.getRegister(), "bar");
+  });
+
+  it("repeats text-object changes with captured insert text", () => {
+    const { editor } = createEditorWithSpy("foo bar baz");
+
+    sendKeys(editor, ["c", "i", "w", "X", "\x1b", "w", "."]);
+
+    assert.equal(editor.getText(), "X X baz");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats put commands", () => {
+    const p = createEditorWithSpy("abc").editor;
+    p.setRegister("X");
+    sendKeys(p, ["p", "."]);
+
+    const P = createEditorWithSpy("abc").editor;
+    P.setRegister("X");
+    sendKeys(P, ["P", "."]);
+
+    assert.equal(p.getText(), "aXXbc");
+    assert.equal(P.getText(), "XXabc");
+  });
+
+  it("repeats line joins", () => {
+    const join = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(join, ["J", "."]);
+
+    const rawJoin = createMultiLineEditor("a\nb\nc").editor;
+    sendKeys(rawJoin, ["g", "J", "."]);
+
+    assert.equal(join.getText(), "a b c");
+    assert.equal(rawJoin.getText(), "abc");
+  });
+
+  it("uses a count before . to replace counted line joins", () => {
+    const join = createMultiLineEditor("a\nb\nc\nd\ne").editor;
+
+    sendKeys(join, ["2", "J", "3", "."]);
+
+    assert.equal(join.getText(), "a b c d\ne");
+  });
+
+  it("repeats replace commands with their replacement character", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["r", "Z", "l", "."]);
+
+    assert.equal(editor.getText(), "ZZc");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats insert text captured by an insert-mode change", () => {
+    const { editor } = createEditorWithSpy("X");
+
+    sendKeys(editor, ["i", "a", "b", "c", "\x1b", "0", "."]);
+
+    assert.equal(editor.getText(), "abcabcX");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("does not let non-mutating yanks replace the last repeatable change", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["x", "Y", "."]);
+
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("does not enter insert mode or replace repeat after failed c{char-motion}", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["x", "c", "f", "z", "X", "\x1b", "."]);
+
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getMode(), "normal");
+    assert.equal(editor.getRegister(), "b");
+  });
+
+  it("drops stale repeat recording when bracketed paste cancels pending input", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["c", "\x1b[200~paste\x1b[201~", "x", "."]);
+
+    assert.equal(editor.getText(), "c");
+    assert.equal(editor.getMode(), "normal");
+    assert.equal(editor.getRegister(), "b");
   });
 });
 

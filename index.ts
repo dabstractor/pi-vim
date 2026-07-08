@@ -91,13 +91,46 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const MAX_COUNT = 9999;
+const TEXT_INSERT_REPEAT_KEYS = new Set(["i", "a", "A", "I"]);
+const OPEN_LINE_REPEAT_KEYS = new Set(["o", "O"]);
+const REPEATABLE_COMMAND_START_KEYS = new Set([
+  "d",
+  "c",
+  "r",
+  "p",
+  "P",
+  "J",
+  "g",
+  ...TEXT_INSERT_REPEAT_KEYS,
+  ...OPEN_LINE_REPEAT_KEYS,
+  "D",
+  "C",
+  "S",
+  "s",
+  "x",
+]);
 
 type EditorSnapshot = {
   text: string;
   cursor: { line: number; col: number };
 };
 
-type TransitionState = "none" | "undo" | "redo";
+type RepeatRecording = {
+  /** Raw key inputs that reconstruct one repeatable normal-mode change. */
+  keys: string[];
+  /** Replay keys without command counts, used when `{count}.` overrides them. */
+  countOverrideKeys: string[];
+  /** Buffer mutation version before the command started. */
+  startChangeVersion: number;
+  /** True while the command is collecting insert-mode input until Escape. */
+  captureInsert: boolean;
+  /** True when a command completed even if it emitted no mutation event. */
+  forceCommit: boolean;
+};
+
+type RepeatableCommand = Pick<RepeatRecording, "keys" | "countOverrideKeys">;
+
+type TransitionState = "none" | "undo" | "redo" | "restore";
 
 type ModalEditorInternals = {
   state?: { lines?: string[]; cursorLine?: number; cursorCol?: number };
@@ -135,6 +168,11 @@ export class ModalEditor extends CustomEditor {
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
   private wordBoundaryCache = new WordBoundaryCache();
   private readonly redoStack: EditorSnapshot[] = [];
+  private lastRepeatableCommand: RepeatableCommand | null = null;
+  private repeatRecording: RepeatRecording | null = null;
+  private replayingRepeat: boolean = false;
+  private repeatReplayFailed: boolean = false;
+  private bufferChangeVersion: number = 0;
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: ModeColorizers | null;
@@ -246,7 +284,13 @@ export class ModalEditor extends CustomEditor {
 
   override setText(text: string): void {
     this.clearRedoStack();
+    this.clearRepeatState();
     super.setText(text);
+  }
+
+  override insertTextAtCursor(text: string): void {
+    this.cancelRepeatableCommand();
+    super.insertTextAtCursor(text);
   }
 
   private captureSnapshot(): EditorSnapshot {
@@ -378,6 +422,7 @@ export class ModalEditor extends CustomEditor {
 
     editor.onChange = (text: string) => {
       originalOnChange?.(text);
+      this.bufferChangeVersion++;
       this.centralInvalidationCheck();
     };
 
@@ -388,6 +433,242 @@ export class ModalEditor extends CustomEditor {
     if (this.redoStack.length === 0) return;
     if (this.currentTransition !== "none") return;
     this.clearRedoStack();
+  }
+
+  private isRepeatRecordingInProgress(): boolean {
+    return (
+      this.pendingMotion !== null ||
+      this.pendingTextObject !== null ||
+      this.pendingOperator !== null ||
+      this.pendingG ||
+      this.pendingReplace
+    );
+  }
+
+  private isRepeatableCommandStart(key: string): boolean {
+    return REPEATABLE_COMMAND_START_KEYS.has(key);
+  }
+
+  private isOperatorCountDigit(key: string): boolean {
+    return this.isDigit(key) && (key !== "0" || this.operatorCount.length > 0);
+  }
+
+  private shouldStripKeyFromCountOverride(key: string): boolean {
+    if (this.mode === "insert") return false;
+    if (this.pendingMotion || this.pendingTextObject || this.pendingReplace) {
+      return false;
+    }
+    if (!this.pendingOperator) return false;
+    return this.isOperatorCountDigit(key);
+  }
+
+  private shouldCancelInsertRepeatInput(key: string): boolean {
+    if (key === "\r") return true;
+    return key === "\t" && this.isShowingAutocomplete();
+  }
+
+  /**
+   * Dot-repeat is recorded by watching the key stream for one normal-mode
+   * change. The raw key stream is kept for plain `.`, while a second stream
+   * strips normal-mode command counts so `{count}.` can replace the stored
+   * count like Vim instead of multiplying it by repeated replay.
+   */
+  private prepareRepeatRecordingForInput(key: string): void {
+    if (this.replayingRepeat || this.pendingExCommand !== null) return;
+
+    if (this.mode === "insert") {
+      if (this.shouldCancelInsertRepeatInput(key)) {
+        this.clearRepeatState();
+        return;
+      }
+      if (this.repeatRecording?.captureInsert) {
+        this.repeatRecording.keys.push(key);
+        this.repeatRecording.countOverrideKeys.push(key);
+      }
+      return;
+    }
+
+    if (this.repeatRecording && !this.isRepeatRecordingInProgress()) {
+      this.cancelRepeatableCommand();
+    }
+
+    if (this.repeatRecording) {
+      this.repeatRecording.keys.push(key);
+      if (!this.shouldStripKeyFromCountOverride(key)) {
+        this.repeatRecording.countOverrideKeys.push(key);
+      }
+      return;
+    }
+
+    if (this.isRepeatRecordingInProgress()) return;
+    if (!this.isRepeatableCommandStart(key)) return;
+
+    this.repeatRecording = {
+      keys: [...this.prefixCount, key],
+      countOverrideKeys: [key],
+      startChangeVersion: this.bufferChangeVersion,
+      captureInsert: false,
+      forceCommit: false,
+    };
+  }
+
+  private clearRepeatState(): void {
+    if (this.replayingRepeat) return;
+    this.repeatRecording = null;
+    this.lastRepeatableCommand = null;
+  }
+
+  private cancelRepeatableCommand(): void {
+    if (this.replayingRepeat) {
+      this.repeatReplayFailed = true;
+      return;
+    }
+    this.repeatRecording = null;
+  }
+
+  private forceCommitRepeatRecording(): void {
+    if (this.replayingRepeat || !this.repeatRecording) return;
+    this.repeatRecording.forceCommit = true;
+  }
+
+  /**
+   * Commit only after the watched command has completed and changed the buffer.
+   * This naturally ignores motions, yanks, failed edits, and aborted pending
+   * commands while keeping insert-mode changes open until Escape returns to
+   * normal mode.
+   */
+  private finishRepeatRecordingAfterInput(): void {
+    if (this.replayingRepeat) return;
+
+    const recording = this.repeatRecording;
+    if (!recording) return;
+
+    if (this.mode === "insert") {
+      recording.captureInsert = true;
+      return;
+    }
+
+    if (this.isRepeatRecordingInProgress()) return;
+
+    this.repeatRecording = null;
+    if (recording.keys.length === 0) return;
+
+    if (
+      recording.forceCommit ||
+      this.bufferChangeVersion !== recording.startChangeVersion
+    ) {
+      this.lastRepeatableCommand = {
+        keys: [...recording.keys],
+        countOverrideKeys: [...recording.countOverrideKeys],
+      };
+    }
+  }
+
+  private isTextInsertRepeatCommand(command: RepeatableCommand): boolean {
+    return TEXT_INSERT_REPEAT_KEYS.has(command.countOverrideKeys[0] ?? "");
+  }
+
+  private isOpenLineRepeatCommand(command: RepeatableCommand): boolean {
+    return OPEN_LINE_REPEAT_KEYS.has(command.countOverrideKeys[0] ?? "");
+  }
+
+  private getOpenLineRepeatReplayKeys(
+    command: RepeatableCommand,
+    overrideCount: number,
+  ): string[] {
+    if (command.countOverrideKeys[0] !== "O" || overrideCount <= 1) {
+      return Array.from(
+        { length: overrideCount },
+        () => command.countOverrideKeys,
+      ).flat();
+    }
+
+    return Array.from({ length: overrideCount }, (_, index) =>
+      index === 0
+        ? command.countOverrideKeys
+        : ["j", ...command.countOverrideKeys],
+    ).flat();
+  }
+
+  private getRepeatReplayKeys(
+    command: RepeatableCommand,
+    hasOverrideCount: boolean,
+    overrideCount: number,
+  ): string[] {
+    if (!hasOverrideCount) return command.keys;
+
+    if (this.isOpenLineRepeatCommand(command)) {
+      return this.getOpenLineRepeatReplayKeys(command, overrideCount);
+    }
+
+    if (this.isTextInsertRepeatCommand(command)) {
+      const [startKey, ...continuation] = command.countOverrideKeys;
+      const finalKey = continuation[continuation.length - 1];
+      const hasFinalEscape =
+        finalKey !== undefined && this.isEscapeLikeInput(finalKey);
+      const insertKeys = hasFinalEscape
+        ? continuation.slice(0, -1)
+        : continuation;
+      return [
+        startKey,
+        ...Array.from({ length: overrideCount }, () => insertKeys).flat(),
+        ...(hasFinalEscape ? [finalKey] : []),
+      ];
+    }
+
+    return [...String(overrideCount), ...command.countOverrideKeys];
+  }
+
+  /**
+   * Replay the last committed change. Plain `.` replays the original command,
+   * including its count. A count before `.` replaces the original command count.
+   * Replay runs with recording disabled so `.` itself never changes what is
+   * stored as the last repeatable command.
+   */
+  private repeatLastCommand(): void {
+    const command = this.lastRepeatableCommand;
+    const hasOverrideCount = this.hasPendingCount();
+    const overrideCount = this.takeTotalCount(1);
+    if (!command || command.keys.length === 0) return;
+
+    const replayKeys = this.getRepeatReplayKeys(
+      command,
+      hasOverrideCount,
+      overrideCount,
+    );
+    const beforeReplay = this.captureSnapshot();
+    const beforeRegister = this.unnamedRegister;
+    const beforePreferRegisterForPut = this.preferRegisterForPut;
+
+    this.repeatRecording = null;
+    this.repeatReplayFailed = false;
+    this.replayingRepeat = true;
+    try {
+      for (const key of replayKeys) {
+        this.handleInput(key);
+        if (this.repeatReplayFailed) break;
+      }
+    } finally {
+      this.replayingRepeat = false;
+    }
+
+    if (this.repeatReplayFailed) {
+      this.clearPendingState();
+      this.withTransition("restore", () => {
+        this.restoreSnapshot(beforeReplay);
+      });
+      this.unnamedRegister = beforeRegister;
+      this.preferRegisterForPut = beforePreferRegisterForPut;
+      this.repeatReplayFailed = false;
+      return;
+    }
+
+    if (hasOverrideCount) {
+      this.lastRepeatableCommand = {
+        keys: [...replayKeys],
+        countOverrideKeys: [...command.countOverrideKeys],
+      };
+    }
   }
 
   private applySyntheticEdit(mutation: () => void): void {
@@ -579,10 +860,12 @@ export class ModalEditor extends CustomEditor {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
             this.discardingBracketedPasteInNormalMode = false;
             this.clearPendingState();
+            this.cancelRepeatableCommand();
             return;
           } else {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = true;
             this.clearPendingState();
+            this.cancelRepeatableCommand();
             return;
           }
         } else if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
@@ -592,6 +875,7 @@ export class ModalEditor extends CustomEditor {
             data = data.slice(BRACKETED_PASTE_END_TAIL.length);
             if (data.length === 0) {
               this.clearPendingState();
+              this.cancelRepeatableCommand();
               return;
             }
           } else {
@@ -603,99 +887,110 @@ export class ModalEditor extends CustomEditor {
       const { filtered, stripped } = this.stripBracketedPasteInNormalMode(data);
       if (stripped) {
         this.clearPendingState();
+        this.cancelRepeatableCommand();
       }
       if (filtered === null) return;
       data = filtered;
     }
 
-    if (this.isEscapeLikeInput(data)) {
-      this.handleEscape();
-      return;
-    }
-
-    if ("insert" === this.mode) {
-      if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
-        super.handleInput(CTRL_E);
-        return;
-      }
-      if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
-        super.handleInput(CTRL_A);
-        return;
-      }
-      if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
-        this.openLineBelow();
-        return;
-      }
-      if (matchesKey(data, Key.shiftAlt("o")) || data === "\x1bO") {
-        this.openLineAbove();
-        return;
-      }
-      super.handleInput(data);
-      return;
-    }
-
-    if (this.pendingReplace) {
-      this.pendingReplace = false;
-      if (!this.isPrintableInput(data)) {
-        this.prefixCount = "";
-        this.operatorCount = "";
+    this.prepareRepeatRecordingForInput(data);
+    try {
+      if (this.isEscapeLikeInput(data)) {
+        this.handleEscape();
         return;
       }
 
-      const count = this.takeTotalCount(1);
-      const cursor = this.getCursor();
-      const line = this.getLines()[cursor.line] ?? "";
-      const range = this.getGraphemeRangeAtCol(line, cursor.col, count);
-      if (!range) return;
+      if ("insert" === this.mode) {
+        if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
+          super.handleInput(CTRL_E);
+          return;
+        }
+        if (matchesKey(data, Key.shiftAlt("i")) || data === "\x1bI") {
+          super.handleInput(CTRL_A);
+          return;
+        }
+        if (matchesKey(data, Key.alt("o")) || data === "\x1bo") {
+          this.openLineBelow();
+          return;
+        }
+        if (matchesKey(data, Key.shiftAlt("o")) || data === "\x1bO") {
+          this.openLineAbove();
+          return;
+        }
+        super.handleInput(data);
+        return;
+      }
 
-      const before = line.slice(0, range.start);
-      const after = line.slice(range.end);
-      const replacement = data.repeat(count);
-      const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
-      const text = this.getText();
-      const newText =
-        text.slice(0, lineStartAbs) +
-        before +
-        replacement +
-        after +
-        text.slice(lineStartAbs + line.length);
-      const newCursorAbs =
-        lineStartAbs + before.length + data.length * (count - 1);
-      this.replaceTextInBuffer(newText, newCursorAbs);
-      return;
+      if (this.pendingReplace) {
+        this.pendingReplace = false;
+        if (!this.isPrintableInput(data)) {
+          this.prefixCount = "";
+          this.operatorCount = "";
+          this.cancelRepeatableCommand();
+          return;
+        }
+
+        const count = this.takeTotalCount(1);
+        const cursor = this.getCursor();
+        const line = this.getLines()[cursor.line] ?? "";
+        const range = this.getGraphemeRangeAtCol(line, cursor.col, count);
+        if (!range) {
+          this.cancelRepeatableCommand();
+          return;
+        }
+
+        const before = line.slice(0, range.start);
+        const after = line.slice(range.end);
+        const replacement = data.repeat(count);
+        const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
+        const text = this.getText();
+        const newText =
+          text.slice(0, lineStartAbs) +
+          before +
+          replacement +
+          after +
+          text.slice(lineStartAbs + line.length);
+        const newCursorAbs =
+          lineStartAbs + before.length + data.length * (count - 1);
+        this.forceCommitRepeatRecording();
+        this.replaceTextInBuffer(newText, newCursorAbs);
+        return;
+      }
+
+      if (this.pendingExCommand !== null) {
+        this.handlePendingExCommand(data);
+        return;
+      }
+
+      if (this.pendingTextObject) {
+        this.handlePendingTextObject(data);
+        return;
+      }
+
+      if (this.pendingMotion) {
+        this.handlePendingMotion(data);
+        return;
+      }
+
+      if (this.pendingOperator === "d") {
+        this.handlePendingDelete(data);
+        return;
+      }
+
+      if (this.pendingOperator === "c") {
+        this.handlePendingChange(data);
+        return;
+      }
+
+      if (this.pendingOperator === "y") {
+        this.handlePendingYank(data);
+        return;
+      }
+
+      this.handleNormalMode(data);
+    } finally {
+      this.finishRepeatRecordingAfterInput();
     }
-
-    if (this.pendingExCommand !== null) {
-      this.handlePendingExCommand(data);
-      return;
-    }
-
-    if (this.pendingTextObject) {
-      this.handlePendingTextObject(data);
-      return;
-    }
-
-    if (this.pendingMotion) {
-      this.handlePendingMotion(data);
-      return;
-    }
-
-    if (this.pendingOperator === "d") {
-      this.handlePendingDelete(data);
-      return;
-    }
-
-    if (this.pendingOperator === "c") {
-      this.handlePendingChange(data);
-      return;
-    }
-
-    if (this.pendingOperator === "y") {
-      this.handlePendingYank(data);
-      return;
-    }
-
-    this.handleNormalMode(data);
   }
 
   private clearUnderlyingPasteStateIfActive(): void {
@@ -733,6 +1028,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingReplace
     ) {
       this.clearPendingState();
+      this.cancelRepeatableCommand();
       return;
     }
     if ("insert" === this.mode) {
@@ -940,8 +1236,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private opDigit(data: string): boolean {
-    if (!this.isDigit(data) || (data === "0" && !this.operatorCount))
-      return false;
+    if (!this.isOperatorCountDigit(data)) return false;
     this.operatorCount += data;
     return true;
   }
@@ -950,6 +1245,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingOperator = null;
     this.prefixCount = "";
     this.operatorCount = "";
+    this.cancelRepeatableCommand();
     if (!this.isPrintableChunk(data)) {
       super.handleInput(data);
     }
@@ -966,12 +1262,18 @@ export class ModalEditor extends CustomEditor {
     if (!pendingMotion) return;
 
     if (this.pendingOperator === "d") {
-      this.deleteWithCharMotion(pendingMotion, data);
+      if (!this.deleteWithCharMotion(pendingMotion, data)) {
+        this.cancelRepeatableCommand();
+      }
       this.pendingOperator = null;
     } else if (this.pendingOperator === "c") {
-      this.deleteWithCharMotion(pendingMotion, data);
+      const changed = this.deleteWithCharMotion(pendingMotion, data);
       this.pendingOperator = null;
-      this.setMode();
+      if (changed) {
+        this.setMode();
+      } else {
+        this.cancelRepeatableCommand();
+      }
     } else if (this.pendingOperator === "y") {
       this.yankWithCharMotion(pendingMotion, data);
       this.pendingOperator = null;
@@ -987,6 +1289,7 @@ export class ModalEditor extends CustomEditor {
     this.pendingTextObject = null;
     if (!pendingTextObject) {
       this.pendingOperator = null;
+      this.cancelRepeatableCommand();
       return;
     }
 
@@ -1007,6 +1310,7 @@ export class ModalEditor extends CustomEditor {
       );
       if (!range || !this.pendingOperator) {
         this.pendingOperator = null;
+        this.cancelRepeatableCommand();
         return;
       }
 
@@ -1037,12 +1341,17 @@ export class ModalEditor extends CustomEditor {
     const pendingOperator = this.pendingOperator;
     this.pendingOperator = null;
 
-    if (!pendingOperator || range.endAbs < range.startAbs) return;
+    if (!pendingOperator || range.endAbs < range.startAbs) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     if (range.endAbs === range.startAbs) {
       if (pendingOperator === "c") {
         this.moveCursorToAbsoluteIndex(range.startAbs);
         this.setMode();
+      } else {
+        this.cancelRepeatableCommand();
       }
       return;
     }
@@ -1330,6 +1639,7 @@ export class ModalEditor extends CustomEditor {
         data === "P" ||
         data === "Y" ||
         data === "J" ||
+        data === "." ||
         data === "u" ||
         data === CTRL_UNDERSCORE ||
         matchesKey(data, "ctrl+_") ||
@@ -1473,6 +1783,11 @@ export class ModalEditor extends CustomEditor {
 
     if (data === CTRL_R || matchesKey(data, "ctrl+r")) {
       this.performRedo();
+      return;
+    }
+
+    if (data === ".") {
+      this.repeatLastCommand();
       return;
     }
 
@@ -1904,10 +2219,16 @@ export class ModalEditor extends CustomEditor {
     const op = this.pendingOperator;
     const counted = this.hasPendingCount();
     this.clearPendingState();
-    if (!op || counted) return;
+    if (!op || counted) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     const t = this.getMatchingPairMotionTarget();
-    if (!t) return;
+    if (!t) {
+      this.cancelRepeatableCommand();
+      return;
+    }
 
     if (op === "y") {
       this.yankRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
@@ -1915,7 +2236,10 @@ export class ModalEditor extends CustomEditor {
     }
 
     this.deleteRangeByAbsolute(t.rangeAnchorAbs, t.targetAbs, true);
-    if (op === "c") this.setMode("insert");
+    if (op === "c") {
+      this.setMode("insert");
+      return;
+    }
   }
 
   private getDelimitedTextObjectCursorAbs(): number {
@@ -2515,7 +2839,10 @@ export class ModalEditor extends CustomEditor {
     this.moveCursorToCol(Math.min(startCol, line.length));
   }
 
-  private deleteWithCharMotion(motion: CharMotion, targetChar: string): void {
+  private deleteWithCharMotion(
+    motion: CharMotion,
+    targetChar: string,
+  ): boolean {
     const line = this.getLines()[this.getCursor().line] ?? "";
     const col = this.getCursor().col;
     const count = this.takeTotalCount(1);
@@ -2528,10 +2855,11 @@ export class ModalEditor extends CustomEditor {
       count,
     );
 
-    if (targetCol === null) return;
+    if (targetCol === null) return false;
 
     this.lastCharMotion = { motion, char: targetChar };
     this.deleteRange(col, targetCol, true);
+    return true;
   }
 
   private handlePendingYank(data: string): void {

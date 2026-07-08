@@ -78,9 +78,17 @@ const THRESHOLDS = {
   // (+4039 B). Budgets bumped 35500 -> 36400 and 153000 -> 156500 to fit
   // the feature with ~300 B / ~700 B headroom (test files are excluded
   // from the package, so their new cases do not count).
+  //
+  // Dot repeat (.): index.ts gains the keystroke-recorder (RepeatRecording
+  // capture, count-override replay, failed-replay snapshot rollback, and
+  // insertTextAtCursor/Enter/Tab recording-cancel guards), a `.`
+  // interception, and repeat rows in the README. Measured: packed 36099 ->
+  // 38298 (+2199 B), unpacked 155801 -> 166012 (+10211 B; README + the
+  // wider try/finally dispatch surface). Budgets bumped 36400 -> 38700 and
+  // 156500 -> 167000 to fit the feature with ~400 B / ~1000 B headroom.
   maxFiles: 16,
-  maxSize: 36400,
-  maxUnpackedSize: 156500,
+  maxSize: 38700,
+  maxUnpackedSize: 167000,
 } as const;
 
 function compareStrings(a: string, b: string): number {
