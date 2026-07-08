@@ -1120,8 +1120,16 @@ export class ModalEditor extends CustomEditor {
       data === "E" ||
       data === "B";
     const supportsCountedTextObject = data === "i" || data === "a";
+    const supportsCountedLineEnd = data === "$";
+    const supportsIgnoredCountMotion = data === "0" || data === "^";
 
-    if (hasCount && !supportsCountedWordMotion && !supportsCountedTextObject) {
+    if (
+      hasCount &&
+      !supportsCountedWordMotion &&
+      !supportsCountedTextObject &&
+      !supportsCountedLineEnd &&
+      !supportsIgnoredCountMotion
+    ) {
       this.cancelPendingOperator(data);
       return;
     }
@@ -1131,7 +1139,18 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (supportsCountedLineEnd) {
+      const count = this.takeTotalCount(1);
+      if (this.applyLineEndOperator(count, "delete")) {
+        this.pendingOperator = null;
+        return;
+      }
+      this.cancelPendingOperator(data);
+      return;
+    }
+
     const motionCount = supportsCountedWordMotion ? this.takeTotalCount(1) : 1;
+    if (supportsIgnoredCountMotion) this.takeTotalCount(1);
     if (this.deleteWithMotion(data, motionCount)) {
       this.pendingOperator = null;
       return;
@@ -1195,8 +1214,16 @@ export class ModalEditor extends CustomEditor {
       data === "E" ||
       data === "B";
     const supportsCountedTextObject = data === "i" || data === "a";
+    const supportsCountedLineEnd = data === "$";
+    const supportsIgnoredCountMotion = data === "0" || data === "^";
 
-    if (hasCount && !supportsCountedWordMotion && !supportsCountedTextObject) {
+    if (
+      hasCount &&
+      !supportsCountedWordMotion &&
+      !supportsCountedTextObject &&
+      !supportsCountedLineEnd &&
+      !supportsIgnoredCountMotion
+    ) {
       this.cancelPendingOperator(data);
       return;
     }
@@ -1206,7 +1233,19 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    if (supportsCountedLineEnd) {
+      const count = this.takeTotalCount(1);
+      if (this.applyLineEndOperator(count, "change")) {
+        this.pendingOperator = null;
+        this.setMode();
+        return;
+      }
+      this.cancelPendingOperator(data);
+      return;
+    }
+
     const motionCount = supportsCountedWordMotion ? this.takeTotalCount(1) : 1;
+    if (supportsIgnoredCountMotion) this.takeTotalCount(1);
     const effectiveMotion =
       data === "W" && this.isCursorOnNonWhitespace() ? "E" : data;
     if (this.deleteWithMotion(effectiveMotion, motionCount)) {
@@ -2389,6 +2428,91 @@ export class ModalEditor extends CustomEditor {
     }
 
     return false;
+  }
+
+  // Handles counted `d$`/`c$`. `$` with a count N descends N-1 lines before
+  // going to end of line, so the operator spans multiple lines. Semantics
+  // match nvim (verified against the real editor): count 1 delegates to the
+  // existing single-line path; on the last line a count >= 2 aborts as a
+  // no-op; `d$` (but not `c$`) becomes linewise when the cursor is at or
+  // before the first non-blank column.
+  private applyLineEndOperator(
+    count: number,
+    mode: "change" | "delete",
+  ): boolean {
+    const clampedCount = Math.max(1, Math.min(MAX_COUNT, count));
+    if (clampedCount <= 1) {
+      this.cutToEndOfLine();
+      return true;
+    }
+
+    const lines = this.getLines();
+    if (lines.length === 0) return false;
+
+    const cursor = this.getCursor();
+    const lastLine = lines.length - 1;
+    if (cursor.line >= lastLine) return false;
+
+    const targetLine = Math.min(cursor.line + clampedCount - 1, lastLine);
+    const text = this.getText();
+    const startAbs = this.getAbsoluteIndex(cursor.line, cursor.col);
+    const targetLineText = lines[targetLine] ?? "";
+    const targetEndAbs = this.getAbsoluteIndex(
+      targetLine,
+      targetLineText.length,
+    );
+
+    const firstNonBlank = findFirstNonWhitespaceColumn(
+      lines[cursor.line] ?? "",
+    );
+    const linewise = mode === "delete" && cursor.col <= firstNonBlank;
+
+    if (linewise) {
+      const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
+      this.writeToRegister(`${text.slice(lineStartAbs, targetEndAbs)}\n`);
+
+      let removeStart = lineStartAbs;
+      let removeEnd = targetEndAbs;
+      if (targetLine < lastLine) {
+        removeEnd = targetEndAbs + 1;
+      } else if (cursor.line > 0) {
+        removeStart = Math.max(0, lineStartAbs - 1);
+      }
+
+      const newText = text.slice(0, removeStart) + text.slice(removeEnd);
+      this.replaceTextInBuffer(newText, Math.min(startAbs, newText.length));
+      this.moveCursorAfterDeleteToLineEnd(cursor.line, cursor.col);
+      return true;
+    }
+
+    this.writeToRegister(text.slice(startAbs, targetEndAbs));
+    const newText = text.slice(0, startAbs) + text.slice(targetEndAbs);
+    this.replaceTextInBuffer(newText, Math.min(startAbs, newText.length));
+    if (mode === "delete") {
+      this.moveCursorAfterDeleteToLineEnd(cursor.line, cursor.col);
+    }
+    return true;
+  }
+
+  private moveCursorAfterDeleteToLineEnd(
+    startLine: number,
+    startCol: number,
+  ): void {
+    const lines = this.getLines();
+    const lineIndex = Math.min(startLine, Math.max(0, lines.length - 1));
+    if (lineIndex < startLine) {
+      this.moveCursorToLineStart(lineIndex);
+      return;
+    }
+
+    const line = lines[lineIndex] ?? "";
+    if (line.length > 0 && startCol >= line.length) {
+      const graphemes = getLineGraphemes(line);
+      this.moveCursorToCol(graphemes[graphemes.length - 1]?.start ?? 0);
+      return;
+    }
+
+    this.moveCursorToCol(Math.min(startCol, line.length));
   }
 
   private deleteWithCharMotion(motion: CharMotion, targetChar: string): void {

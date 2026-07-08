@@ -2520,6 +2520,96 @@ describe("delete operator — WORD motions (dW / dE / dB)", () => {
   });
 });
 
+describe("counted line-end operators — Nd$ / Nc$ / Nd0 / Nd^", () => {
+  it("2d$ deletes charwise through the next line end", () => {
+    const { editor } = createMultiLineEditor("hello world\nfoo bar\nbaz");
+    setInternalCursor(editor, 6, 0);
+
+    sendKeys(editor, ["2", "d", "$"]);
+
+    assert.equal(editor.getText(), "hello \nbaz");
+    assert.equal(editor.getRegister(), "world\nfoo bar");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("2d$ from column zero deletes whole lines (linewise register)", () => {
+    const { editor } = createMultiLineEditor("hello world\nfoo bar\nbaz");
+    setInternalCursor(editor, 0, 0);
+
+    sendKeys(editor, ["2", "d", "$"]);
+
+    assert.equal(editor.getText(), "baz");
+    assert.equal(editor.getRegister(), "hello world\nfoo bar\n");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("2d$ on the last line is a no-op", () => {
+    const { editor } = createMultiLineEditor("aa\nbbbb");
+    setInternalCursor(editor, 1, 1);
+
+    sendKeys(editor, ["2", "d", "$"]);
+
+    assert.equal(editor.getText(), "aa\nbbbb");
+    assert.equal(editor.getRegister(), "");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 1 });
+  });
+
+  it("d5$ uses the operator-side count and clamps to the last line", () => {
+    const { editor } = createMultiLineEditor("aaa\nbbb\nccc");
+    setInternalCursor(editor, 1, 0);
+
+    sendKeys(editor, ["d", "5", "$"]);
+
+    assert.equal(editor.getText(), "a");
+    assert.equal(editor.getRegister(), "aa\nbbb\nccc");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("2c$ changes charwise through the next line end and enters insert", () => {
+    const { editor } = createMultiLineEditor("hello world\nfoo bar\nbaz");
+    setInternalCursor(editor, 6, 0);
+
+    sendKeys(editor, ["2", "c", "$"]);
+    assert.equal(editor.getMode(), "insert");
+    sendKeys(editor, ["Z", "\x1b"]);
+
+    assert.equal(editor.getText(), "hello Z\nbaz");
+    assert.equal(editor.getRegister(), "world\nfoo bar");
+  });
+
+  it("2c$ from column zero stays charwise (never linewise)", () => {
+    const { editor } = createMultiLineEditor("hello world\nfoo bar\nbaz");
+    setInternalCursor(editor, 0, 0);
+
+    sendKeys(editor, ["2", "c", "$", "Z", "\x1b"]);
+
+    assert.equal(editor.getText(), "Z\nbaz");
+    assert.equal(editor.getRegister(), "hello world\nfoo bar");
+  });
+
+  it("2d0 ignores the count and deletes back to line start", () => {
+    const { editor } = createMultiLineEditor("  foo bar");
+    setInternalCursor(editor, 6, 0);
+
+    sendKeys(editor, ["2", "d", "0"]);
+
+    assert.equal(editor.getText(), "bar");
+    assert.equal(editor.getRegister(), "  foo ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("2d^ ignores the count and deletes back to first non-blank", () => {
+    const { editor } = createMultiLineEditor("  foo bar");
+    setInternalCursor(editor, 6, 0);
+
+    sendKeys(editor, ["2", "d", "^"]);
+
+    assert.equal(editor.getText(), "  bar");
+    assert.equal(editor.getRegister(), "foo ");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Linewise operators, counts, and whole-buffer flows
 // ---------------------------------------------------------------------------

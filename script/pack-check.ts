@@ -70,9 +70,17 @@ const THRESHOLDS = {
   // import/export boilerplate (~2 KB unpacked, measured). Same code
   // otherwise. Keep budgets tight enough to catch accidental docs/tests
   // in the package.
+  //
+  // Counted line-end operators (Nd$/Nc$ across lines, plus count-ignoring
+  // Nd0/Nd^/Nc0/Nc^): index.ts adds applyLineEndOperator +
+  // moveCursorAfterDeleteToLineEnd and two operator-dispatch guards.
+  // Measured: packed 35341 -> 36099 (+758 B), unpacked 151762 -> 155801
+  // (+4039 B). Budgets bumped 35500 -> 36400 and 153000 -> 156500 to fit
+  // the feature with ~300 B / ~700 B headroom (test files are excluded
+  // from the package, so their new cases do not count).
   maxFiles: 16,
-  maxSize: 35500,
-  maxUnpackedSize: 153000,
+  maxSize: 36400,
+  maxUnpackedSize: 156500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
