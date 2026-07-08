@@ -32,6 +32,15 @@ import {
   stripSoftwareCursorAfterMarker,
 } from "./cursor-shape.js";
 import {
+  isBackspaceLikeInput,
+  isCountStarter,
+  isDigit,
+  isEnterLikeInput,
+  isEscapeLikeInput,
+  isPrintableChunk,
+  isPrintableInput,
+} from "./input-keys.js";
+import {
   cancelModeChangeCommands,
   createModeChangeHandler,
   setModeChangeCommandRunnerForTests,
@@ -450,7 +459,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private isOperatorCountDigit(key: string): boolean {
-    return this.isDigit(key) && (key !== "0" || this.operatorCount.length > 0);
+    return isDigit(key) && (key !== "0" || this.operatorCount.length > 0);
   }
 
   private shouldStripKeyFromCountOverride(key: string): boolean {
@@ -605,7 +614,7 @@ export class ModalEditor extends CustomEditor {
       const [startKey, ...continuation] = command.countOverrideKeys;
       const finalKey = continuation[continuation.length - 1];
       const hasFinalEscape =
-        finalKey !== undefined && this.isEscapeLikeInput(finalKey);
+        finalKey !== undefined && isEscapeLikeInput(finalKey);
       const insertKeys = hasFinalEscape
         ? continuation.slice(0, -1)
         : continuation;
@@ -744,10 +753,6 @@ export class ModalEditor extends CustomEditor {
     this.clearPendingExCommand();
   }
 
-  private isEscapeLikeInput(data: string): boolean {
-    return matchesKey(data, "escape") || matchesKey(data, "ctrl+[");
-  }
-
   private normalizePendingExCommandInput(data: string): string | null {
     let chunk = data;
     let normalized = "";
@@ -780,7 +785,7 @@ export class ModalEditor extends CustomEditor {
           continue;
         }
 
-        if (this.isEscapeLikeInput(chunk)) {
+        if (isEscapeLikeInput(chunk)) {
           this.pendingEscWhileAcceptingBracketedPasteInExCommand = true;
           return normalized.length > 0 ? normalized : null;
         }
@@ -855,7 +860,7 @@ export class ModalEditor extends CustomEditor {
       data = normalized;
     } else if (this.mode !== "insert") {
       if (this.discardingBracketedPasteInNormalMode) {
-        if (this.isEscapeLikeInput(data)) {
+        if (isEscapeLikeInput(data)) {
           if (this.pendingEscWhileDiscardingBracketedPasteInNormalMode) {
             this.pendingEscWhileDiscardingBracketedPasteInNormalMode = false;
             this.discardingBracketedPasteInNormalMode = false;
@@ -895,7 +900,7 @@ export class ModalEditor extends CustomEditor {
 
     this.prepareRepeatRecordingForInput(data);
     try {
-      if (this.isEscapeLikeInput(data)) {
+      if (isEscapeLikeInput(data)) {
         this.handleEscape();
         return;
       }
@@ -923,7 +928,7 @@ export class ModalEditor extends CustomEditor {
 
       if (this.pendingReplace) {
         this.pendingReplace = false;
-        if (!this.isPrintableInput(data)) {
+        if (!isPrintableInput(data)) {
           this.prefixCount = "";
           this.operatorCount = "";
           this.cancelRepeatableCommand();
@@ -1040,24 +1045,6 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
-  private isEnterLikeInput(data: string): boolean {
-    return (
-      data === "\r" ||
-      data === "\n" ||
-      matchesKey(data, "enter") ||
-      matchesKey(data, "return")
-    );
-  }
-
-  private isBackspaceLikeInput(data: string): boolean {
-    return (
-      data === "\x7f" ||
-      data === "\x08" ||
-      matchesKey(data, "backspace") ||
-      matchesKey(data, "ctrl+h")
-    );
-  }
-
   private deleteLastPendingExCommandGrapheme(): void {
     const current = this.pendingExCommand ?? "";
     const graphemes = getLineGraphemes(current);
@@ -1123,12 +1110,12 @@ export class ModalEditor extends CustomEditor {
   }
 
   private handlePendingExCommand(data: string): void {
-    if (this.isEnterLikeInput(data)) {
+    if (isEnterLikeInput(data)) {
       this.submitPendingExCommand();
       return;
     }
 
-    if (this.isBackspaceLikeInput(data)) {
+    if (isBackspaceLikeInput(data)) {
       this.deleteLastPendingExCommandGrapheme();
       return;
     }
@@ -1137,7 +1124,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (!this.isPrintableChunk(data)) {
+    if (!isPrintableChunk(data)) {
       this.clearPendingExCommand();
       this.handleInput(data);
       return;
@@ -1178,28 +1165,6 @@ export class ModalEditor extends CustomEditor {
     if (command) {
       this.notifyFn(`Unsupported ex command: :${command}`);
     }
-  }
-
-  private isPrintableChunk(data: string): boolean {
-    if (data.length === 0) return false;
-    for (const char of data) {
-      const codePoint = char.codePointAt(0);
-      if (codePoint === undefined || codePoint < 32 || codePoint === 127)
-        return false;
-    }
-    return true;
-  }
-
-  private isPrintableInput(data: string): boolean {
-    return this.isPrintableChunk(data) && getLineGraphemes(data).length === 1;
-  }
-
-  private isDigit(data: string): boolean {
-    return data.length === 1 && data >= "0" && data <= "9";
-  }
-
-  private isCountStarter(data: string): boolean {
-    return data.length === 1 && data >= "1" && data <= "9";
   }
 
   private takeTotalCount(defaultValue: number = 1): number {
@@ -1246,13 +1211,13 @@ export class ModalEditor extends CustomEditor {
     this.prefixCount = "";
     this.operatorCount = "";
     this.cancelRepeatableCommand();
-    if (!this.isPrintableChunk(data)) {
+    if (!isPrintableChunk(data)) {
       super.handleInput(data);
     }
   }
 
   private handlePendingMotion(data: string): void {
-    if (!this.isPrintableInput(data)) {
+    if (!isPrintableInput(data)) {
       this.pendingMotion = null;
       this.cancelPendingOperator(data);
       return;
@@ -1568,7 +1533,7 @@ export class ModalEditor extends CustomEditor {
 
   private handleNormalMode(data: string): void {
     if (this.pendingG) {
-      if (this.isDigit(data)) {
+      if (isDigit(data)) {
         this.pendingGCount += data;
         return;
       }
@@ -1595,7 +1560,7 @@ export class ModalEditor extends CustomEditor {
     }
 
     if (this.prefixCount.length > 0) {
-      if (this.isDigit(data)) {
+      if (isDigit(data)) {
         this.prefixCount += data;
         return;
       }
@@ -1688,7 +1653,7 @@ export class ModalEditor extends CustomEditor {
         this.prefixCount = "";
         this.operatorCount = "";
       }
-    } else if (this.isCountStarter(data)) {
+    } else if (isCountStarter(data)) {
       this.prefixCount = data;
       return;
     }
@@ -1845,7 +1810,7 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (this.isPrintableChunk(data)) return;
+    if (isPrintableChunk(data)) return;
     super.handleInput(data);
   }
 
