@@ -2,13 +2,13 @@
   "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
   "files": {
     "includes": [
-      "**",
-      "!node_modules",
-      "!.claude",
-      "!.pi",
-      "!.tree",
-      "!.tmp",
-      "!doc"
+      "*.ts",
+      "test/**/*.ts",
+      "script/**/*.ts",
+      "biome.json",
+      "package.json",
+      "tsconfig.json",
+      "eslint.config.mjs"
     ],
     "ignoreUnknown": true
   },
