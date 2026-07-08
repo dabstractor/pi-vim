@@ -13,6 +13,11 @@ const PUT_PARITY_CASES: NvimParityCase[] = [
     keys: ["P"],
   },
   {
+    name: "p leaves the cursor on a pasted emoji grapheme",
+    initial: { text: "ab", cursor: { line: 0, col: 0 }, register: "💩" },
+    keys: ["p"],
+  },
+  {
     name: "p puts a line-wise register below the current line",
     initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "X\n" },
     keys: ["p"],
@@ -25,8 +30,6 @@ const PUT_PARITY_CASES: NvimParityCase[] = [
 ];
 
 const KNOWN_NVIM_PUT_PARITY_GAPS = new Set([
-  "p puts a character-wise register after the cursor",
-  "P puts a character-wise register before the cursor",
   "p puts a line-wise register below the current line",
   "P puts a line-wise register above the current line",
 ]);

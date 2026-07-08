@@ -2686,6 +2686,16 @@ export class ModalEditor extends CustomEditor {
     }
   }
 
+  private moveCursorToPreviousGraphemeStart(): void {
+    const cursor = this.getCursor();
+    const line = this.getLines()[cursor.line] ?? "";
+    const col = Math.max(0, Math.min(cursor.col, line.length));
+    if (col <= 0) return;
+
+    const range = this.getGraphemeRangeAtCol(line, col - 1, 1);
+    if (range) this.moveCursorToCol(range.start);
+  }
+
   private putAfter(): void {
     const count = this.takeTotalCount(1);
     const text = this.getPasteRegisterText();
@@ -2715,6 +2725,7 @@ export class ModalEditor extends CustomEditor {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
     }
+    this.moveCursorToPreviousGraphemeStart();
   }
 
   private putBefore(): void {
@@ -2744,6 +2755,7 @@ export class ModalEditor extends CustomEditor {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
     }
+    this.moveCursorToPreviousGraphemeStart();
   }
 
   private deleteRange(

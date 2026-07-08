@@ -5616,7 +5616,7 @@ describe("put — character-wise", () => {
     assert.equal(editor.getText(), "aSYSb");
     assert.equal(editor.getRegister(), "shadow");
     assert.equal(editor.getMode(), "normal");
-    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
   });
 
   it("P reads OS clipboard text instead of stale internal register", () => {
@@ -5629,7 +5629,7 @@ describe("put — character-wise", () => {
     assert.equal(editor.getText(), "SYSab");
     assert.equal(editor.getRegister(), "shadow");
     assert.equal(editor.getMode(), "normal");
-    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
   });
 
   it("p falls back to internal register when OS clipboard read returns null", () => {
@@ -5892,7 +5892,7 @@ describe("undo / redo — u / ctrl+r", () => {
     sendKeys(editor, ["p"]);
     const afterPutCursor = editor.getCursor();
     assert.equal(editor.getText(), "Xab");
-    assert.deepEqual(afterPutCursor, { line: 0, col: 3 });
+    assert.deepEqual(afterPutCursor, { line: 0, col: 2 });
 
     sendKeys(editor, ["u"]);
     assert.equal(editor.getText(), "X");
@@ -6019,7 +6019,7 @@ describe("undo / redo — u / ctrl+r", () => {
       initial: "ab",
       keys: ["p"],
       expectedText: "aXb",
-      expectedCursor: { line: 0, col: 2 },
+      expectedCursor: { line: 0, col: 1 },
       expectedRegister: "X",
       before: (editor) => editor.setRegister("X"),
     });
@@ -6030,7 +6030,7 @@ describe("undo / redo — u / ctrl+r", () => {
       initial: "ab",
       keys: ["P"],
       expectedText: "Xab",
-      expectedCursor: { line: 0, col: 1 },
+      expectedCursor: { line: 0, col: 0 },
       expectedRegister: "X",
       before: (editor) => editor.setRegister("X"),
     });
