@@ -3,7 +3,6 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import {
-  CURSOR_MARKER,
   Key,
   matchesKey,
   truncateToWidth,
@@ -28,8 +27,9 @@ import {
   type CursorShapeSequence,
   enableCursorShapeSupport,
   getCursorShapeRuntime,
+  hasPromptCursorMarker,
   INSERT_CURSOR_SHAPE,
-  stripSoftwareCursorAfterMarker,
+  stripSoftwareCursorWhenHardwareCursorIsUsed,
 } from "./cursor-shape.js";
 import {
   isBackspaceLikeInput,
@@ -3206,30 +3206,16 @@ export class ModalEditor extends CustomEditor {
       : BLOCK_CURSOR_SHAPE;
   }
 
-  private hasPromptCursorMarker(lines: string[]): boolean {
-    return lines.some((line) => line.includes(CURSOR_MARKER));
-  }
-
-  private stripSoftwareCursorWhenHardwareCursorIsUsed(lines: string[]): void {
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i];
-      if (!line?.includes(CURSOR_MARKER)) continue;
-
-      lines[i] = stripSoftwareCursorAfterMarker(line);
-      return;
-    }
-  }
-
   private syncCursorShapeForRender(lines: string[]): void {
     if (!this.cursorShapeRuntime) return;
-    if (!this.hasPromptCursorMarker(lines)) return;
+    if (!hasPromptCursorMarker(lines)) return;
 
     if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
       this.lastCursorShapeSequence = null;
       return;
     }
 
-    this.stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
+    stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
 
     const sequence = this.getDesiredCursorShapeSequence();
     if (sequence === this.lastCursorShapeSequence) return;

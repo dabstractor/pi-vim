@@ -120,3 +120,19 @@ export function stripSoftwareCursorAfterMarker(line: string): string {
     line.slice(reset.index + reset.sequence.length)
   );
 }
+
+export function hasPromptCursorMarker(lines: string[]): boolean {
+  return lines.some((line) => line.includes(CURSOR_MARKER));
+}
+
+export function stripSoftwareCursorWhenHardwareCursorIsUsed(
+  lines: string[],
+): void {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line?.includes(CURSOR_MARKER)) continue;
+
+    lines[i] = stripSoftwareCursorAfterMarker(line);
+    return;
+  }
+}
