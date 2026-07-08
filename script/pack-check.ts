@@ -86,9 +86,19 @@ const THRESHOLDS = {
   // 38298 (+2199 B), unpacked 155801 -> 166012 (+10211 B; README + the
   // wider try/finally dispatch surface). Budgets bumped 36400 -> 38700 and
   // 156500 -> 167000 to fit the feature with ~400 B / ~1000 B headroom.
+  //
+  // Mode-label extraction (Track 2 ModalEditor split): fitModeLabel +
+  // takeModeLabelSuffix move from index.ts into a new mode-label.ts module.
+  // A pure move (behavior identical), but the new file pays its own import
+  // + doc-comment boilerplate and a package file entry, so it grows rather
+  // than relieves the budget. Measured: packed 38298 -> 38996 (+698 B),
+  // unpacked 166012 -> 167258 (+1246 B), files 15 -> 16. Budgets bumped
+  // 38700 -> 39300 and 167000 -> 168000 to fit with ~300 B / ~740 B
+  // headroom (test files are excluded from the package). File count is now
+  // at the maxFiles cap; the next new module needs a maxFiles bump too.
   maxFiles: 16,
-  maxSize: 38700,
-  maxUnpackedSize: 167000,
+  maxSize: 39300,
+  maxUnpackedSize: 168000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

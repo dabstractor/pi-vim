@@ -50,6 +50,7 @@ import {
   type ModeColorizers,
   resolveModeColors,
 } from "./mode-colors.js";
+import { fitModeLabel } from "./mode-label.js";
 import {
   findCharMotionTarget,
   findFirstNonWhitespaceColumn,
@@ -3199,47 +3200,6 @@ export class ModalEditor extends CustomEditor {
     this.deleteRangeByAbsolute(lineStartAbs + start, lineStartAbs + end);
   }
 
-  private takeModeLabelSuffix(rawLabel: string, width: number): string {
-    if (width <= 0) return "";
-
-    const graphemes = getLineGraphemes(rawLabel);
-    const suffix: string[] = [];
-    let usedWidth = 0;
-
-    for (let i = graphemes.length - 1; i >= 0; i--) {
-      const grapheme = graphemes[i];
-      if (!grapheme) continue;
-
-      const segment = rawLabel.slice(grapheme.start, grapheme.end);
-      const segmentWidth = visibleWidth(segment);
-      if (usedWidth + segmentWidth > width) break;
-      suffix.push(segment);
-      usedWidth += segmentWidth;
-    }
-
-    return suffix.reverse().join("");
-  }
-
-  private fitModeLabel(rawLabel: string, width: number): string {
-    if (visibleWidth(rawLabel) <= width) return rawLabel;
-
-    const prefix = rawLabel.startsWith(" INSERT ")
-      ? " INSERT "
-      : rawLabel.startsWith(" NORMAL ")
-        ? " NORMAL "
-        : rawLabel.startsWith(" EX ")
-          ? " EX "
-          : "";
-
-    if (!prefix || visibleWidth(prefix) >= width) {
-      return truncateToWidth(rawLabel, width, "");
-    }
-
-    const suffixWidth = width - visibleWidth(prefix) - 1;
-    if (suffixWidth <= 0) return `${prefix}…`;
-    return `${prefix}…${this.takeModeLabelSuffix(rawLabel, suffixWidth)}`;
-  }
-
   private getDesiredCursorShapeSequence(): CursorShapeSequence {
     return "insert" === this.mode && this.pendingExCommand === null
       ? INSERT_CURSOR_SHAPE
@@ -3283,7 +3243,7 @@ export class ModalEditor extends CustomEditor {
     this.syncCursorShapeForRender(lines);
     if (lines.length === 0) return lines;
 
-    const rawLabel = this.fitModeLabel(this.getModeLabel(), width);
+    const rawLabel = fitModeLabel(this.getModeLabel(), width);
     const colorize = this.getModeLabelColorizer();
     const label = colorize ? colorize(rawLabel) : rawLabel;
     const last = lines.length - 1;
