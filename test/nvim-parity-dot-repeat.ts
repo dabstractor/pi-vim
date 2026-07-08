@@ -143,6 +143,39 @@ const DOT_REPEAT_FINAL_STATE_CASES: NvimParityCase[] = [
     initial: { text: "ab", cursor: { line: 0, col: 0 }, register: "keep" },
     keys: ["r", "a", "l", "."],
   },
+  // A yank between a put and its repeat is not itself a recorded change, but it
+  // does overwrite the unnamed register; `.` re-runs the put and so pastes the
+  // freshly-yanked text, not the originally-put text (GPT-5.5 cross-check probe).
+  {
+    name: ". after an intervening yank puts the freshly-yanked register",
+    initial: {
+      text: "ab cd ef",
+      cursor: { line: 0, col: 0 },
+      register: "X",
+    },
+    keys: ["p", "w", "y", "w", "0", "."],
+  },
+  {
+    name: ". after an intervening yiw reuses the current unnamed register",
+    initial: {
+      text: "foo bar",
+      cursor: { line: 0, col: 0 },
+      register: "Z",
+    },
+    keys: ["P", "w", "y", "i", "w", "0", "."],
+  },
+  // Counted change through insert mode: `s` supports a count, and a plain `.`
+  // afterward replays the recorded count together with the typed text.
+  {
+    name: ". repeats a counted substitute with its inserted text",
+    initial: { text: "abcdefgh", cursor: { line: 0, col: 0 } },
+    keys: ["3", "s", "X", ESC, "."],
+  },
+  {
+    name: "count before . replaces a counted substitute count",
+    initial: { text: "abcde", cursor: { line: 0, col: 0 } },
+    keys: ["2", "s", "X", ESC, "3", "."],
+  },
 ];
 
 describe("nvim parity dot repeat", () => {

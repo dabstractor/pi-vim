@@ -7436,3 +7436,127 @@ describe("replace — r{char}", () => {
     assert.equal(editor.getRegister(), "untouched");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dot-repeat: `.` as a char-find / replace argument, not a repeat request.
+//
+// When f/F/t/T (incl. as an operator motion like df.) or r is awaiting its
+// argument, `.` is the target/replacement char and must reach the pending
+// handler, not trigger dot-repeat. The dispatch handles this by ordering
+// (pending state is consumed before the normal-mode `.` interception); these
+// tests pin that ordering so a future dispatch refactor cannot silently
+// reintroduce the `f.`/`r.`-triggers-repeat regression that sank the first
+// dot-repeat attempt. Char-argument battery adapted from PR #37 by dabstractor
+// (https://github.com/lajarre/pi-vim/pull/37).
+// ---------------------------------------------------------------------------
+
+describe("char-argument commands accept '.' (not dot-repeat)", () => {
+  it("f. moves to the next period", () => {
+    const { editor } = createEditorWithSpy("ab.cd.ef");
+    sendKeys(editor, ["f", "."]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+    assert.equal(editor.getText(), "ab.cd.ef");
+  });
+
+  it("F. moves to the previous period", () => {
+    const { editor } = createEditorWithSpy("ab.cd.ef");
+    setInternalCursor(editor, 5);
+    sendKeys(editor, ["F", "."]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("t. moves to before the next period", () => {
+    const { editor } = createEditorWithSpy("ab.cd.ef");
+    sendKeys(editor, ["t", "."]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("r. replaces the char under the cursor with a period", () => {
+    const { editor } = createEditorWithSpy("abcde");
+    setInternalCursor(editor, 1);
+    sendKeys(editor, ["r", "."]);
+    assert.equal(editor.getText(), "a.cde");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("df. deletes up to and including the next period", () => {
+    const { editor } = createEditorWithSpy("ab.cd.ef");
+    sendKeys(editor, ["d", "f", "."]);
+    assert.equal(editor.getText(), "cd.ef");
+  });
+
+  it("3f. respects a count with '.' as the target", () => {
+    const { editor } = createEditorWithSpy("a.b.c.d");
+    sendKeys(editor, ["3", "f", "."]);
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("2r. replaces two chars with periods", () => {
+    const { editor } = createEditorWithSpy("abcde");
+    sendKeys(editor, ["2", "r", "."]);
+    assert.equal(editor.getText(), "..cde");
+  });
+
+  it("f. is a pure motion; a following '.' repeats the prior change", () => {
+    const { editor } = createEditorWithSpy("ab.c");
+    // x records a change; f. is a motion (must not overwrite it); the final '.'
+    // repeats x at the new cursor, deleting the period -> "bc".
+    sendKeys(editor, ["x", "f", ".", "."]);
+    assert.equal(editor.getText(), "bc");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("dot-repeat still fires when no char-argument command is pending", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]);
+    assert.equal(editor.getText(), "llo");
+  });
+
+  it("'.' while an operator is pending cancels and does not repeat (d .)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "d", "."]); // d pending; '.' cancels d; x stays last change
+    assert.equal(editor.getText(), "ello");
+  });
+
+  it("'.' while 'g' is pending cancels and does not repeat (g .)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "g", "."]);
+    assert.equal(editor.getText(), "ello");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dot-repeat: undo/redo interactions.
+//
+// Undo/redo mutate the buffer but are not repeatable changes, so `.` still
+// repeats the change that preceded them, and a repeat is itself an ordinary
+// undoable edit. The nvim parity oracle cannot cover these (its `u` prints a
+// message that pollutes the result line), so they are pinned as unit tests.
+// ---------------------------------------------------------------------------
+
+describe("dot repeat — undo/redo interactions", () => {
+  it("does not record undo; '.' repeats the change before the undo (x u .)", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // "ello world"
+    sendKeys(editor, ["u"]); // undo -> "hello world"
+    assert.equal(editor.getText(), "hello world");
+    sendKeys(editor, ["."]); // repeats x -> "ello world"
+    assert.equal(editor.getText(), "ello world");
+  });
+
+  it("produces an undoable edit; u reverts one repeat step (x . u)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]); // "llo"
+    assert.equal(editor.getText(), "llo");
+    sendKeys(editor, ["u"]); // undo the `.` only
+    assert.equal(editor.getText(), "ello");
+  });
+
+  it("u after '.' then ctrl+r redoes the repeat step", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "."]); // "llo"
+    sendKeys(editor, ["u"]); // "ello"
+    sendKeys(editor, ["\x12"]); // redo -> "llo"
+    assert.equal(editor.getText(), "llo");
+  });
+});

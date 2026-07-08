@@ -215,6 +215,23 @@ const EDIT_PARITY_CASES: EditParityCase[] = [
       register: "keep",
     },
   },
+  // '.' as the replacement char must reach the pending-replace handler as an
+  // argument, not be swallowed by the dot-repeat interception (see PR #37).
+  {
+    name: "r. replaces with a period (not dot-repeat)",
+    initial: {
+      text: "abcde",
+      cursor: { line: 0, col: 1 },
+      register: "keep",
+    },
+    keys: ["r", "."],
+    expected: {
+      text: "a.cde",
+      cursor: { line: 0, col: 1 },
+      mode: "normal",
+      register: "keep",
+    },
+  },
 ];
 
 const KNOWN_NVIM_PARITY_GAPS = new Set([
