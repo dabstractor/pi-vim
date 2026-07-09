@@ -3,7 +3,10 @@ import { spawn } from "node:child_process";
 import { ModalEditor } from "../index.js";
 import { stubKeybindings, stubTheme, stubTui } from "./harness.js";
 
-export type NvimParityMode = "normal" | "insert";
+export type NvimParityMode = "normal" | "insert" | "visual" | "visual-line";
+
+/** The lua driver can only seed the buffer in one of these two modes. */
+export type NvimParityInitialMode = "normal" | "insert";
 
 export type NvimParityCursor = {
   line: number;
@@ -13,7 +16,7 @@ export type NvimParityCursor = {
 export type NvimParityInitialState = {
   text: string;
   cursor: NvimParityCursor;
-  mode?: NvimParityMode;
+  mode?: NvimParityInitialMode;
   register?: string;
 };
 
@@ -64,6 +67,8 @@ const NVIM_MODE_MAP: Record<string, NvimParityMode> = {
   R: "insert",
   Rc: "insert",
   Rv: "insert",
+  v: "visual",
+  V: "visual-line",
 };
 
 const NVIM_DRIVER_LUA = [

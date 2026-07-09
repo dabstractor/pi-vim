@@ -48,6 +48,7 @@ import {
 import {
   buildModeColorizers,
   type ModeColorizers,
+  type ModeColorKey,
   resolveModeColors,
 } from "./mode-colors.js";
 import { fitModeLabel } from "./mode-label.js";
@@ -90,6 +91,15 @@ import {
   NORMAL_KEYS,
 } from "./types.js";
 import {
+  clampVisualPosition,
+  getInclusiveEndColumn,
+  getVisualLineRange,
+  isVisualMode,
+  orderVisualEndpoints,
+  type VisualMode,
+  type VisualPosition,
+} from "./visual.js";
+import {
   WordBoundaryCache,
   type WordMotionDirection,
   type WordMotionTarget,
@@ -118,6 +128,28 @@ const REPEATABLE_COMMAND_START_KEYS = new Set([
   "S",
   "s",
   "x",
+]);
+// Normal-mode commands that must never run while a visual selection is live.
+// They are swallowed instead of falling through to the normal-mode dispatch.
+const VISUAL_IGNORED_KEYS = new Set([
+  "p",
+  "P",
+  "r",
+  "J",
+  "u",
+  "U",
+  "~",
+  ">",
+  "<",
+  ".",
+  ":",
+  "i",
+  "a",
+  "A",
+  "I",
+  "R",
+  CTRL_R,
+  CTRL_UNDERSCORE,
 ]);
 
 type EditorSnapshot = {
@@ -170,6 +202,7 @@ export class ModalEditor extends CustomEditor {
   private pendingG: boolean = false;
   private pendingGCount: string = "";
   private pendingReplace: boolean = false;
+  private visualAnchor: VisualPosition | null = null;
   private pendingExCommand: string | null = null;
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
@@ -258,9 +291,9 @@ export class ModalEditor extends CustomEditor {
     return this.getLines().join("\n");
   }
 
-  private getActiveMode(): Mode | "ex" {
+  private getActiveMode(): ModeColorKey {
     if (this.pendingExCommand !== null) return "ex";
-    return this.mode;
+    return this.mode === "insert" ? "insert" : "normal";
   }
 
   private installModeBorderColorizer(): void {
@@ -485,6 +518,11 @@ export class ModalEditor extends CustomEditor {
    */
   private prepareRepeatRecordingForInput(key: string): void {
     if (this.replayingRepeat || this.pendingExCommand !== null) return;
+
+    // Visual-mode operators are not dot-repeatable; they clear the stored
+    // command instead of recording a normal-mode key stream that would replay
+    // as something else entirely.
+    if (isVisualMode(this.mode)) return;
 
     if (this.mode === "insert") {
       if (this.shouldCancelInsertRepeatInput(key)) {
@@ -993,6 +1031,8 @@ export class ModalEditor extends CustomEditor {
         return;
       }
 
+      if (isVisualMode(this.mode) && this.handleVisualMode(data)) return;
+
       this.handleNormalMode(data);
     } finally {
       this.finishRepeatRecordingAfterInput();
@@ -1035,6 +1075,10 @@ export class ModalEditor extends CustomEditor {
     ) {
       this.clearPendingState();
       this.cancelRepeatableCommand();
+      return;
+    }
+    if (isVisualMode(this.mode)) {
+      this.exitVisualMode();
       return;
     }
     if ("insert" === this.mode) {
@@ -1532,6 +1576,169 @@ export class ModalEditor extends CustomEditor {
     this.cancelPendingOperator(data);
   }
 
+  private enterVisualMode(mode: VisualMode): void {
+    if (!isVisualMode(this.mode)) {
+      const cursor = this.getCursor();
+      this.visualAnchor = { line: cursor.line, col: cursor.col };
+    }
+    this.takeTotalCount(1);
+    this.setMode(mode);
+  }
+
+  private exitVisualMode(): void {
+    this.visualAnchor = null;
+    this.setMode("normal");
+  }
+
+  private getVisualAnchor(): VisualPosition {
+    const cursor = this.getCursor();
+    return clampVisualPosition(this.visualAnchor ?? cursor, this.getLines());
+  }
+
+  /** Absolute `[startAbs, endAbs)` span of the inclusive char-wise selection. */
+  private getVisualCharwiseRange(): { startAbs: number; endAbs: number } {
+    const { start, end } = orderVisualEndpoints(
+      this.getVisualAnchor(),
+      this.getCursor(),
+    );
+    const endLine = this.getLines()[end.line] ?? "";
+    return {
+      startAbs: this.getAbsoluteIndex(start.line, start.col),
+      endAbs:
+        this.getAbsoluteIndex(end.line, 0) +
+        getInclusiveEndColumn(endLine, end.col),
+    };
+  }
+
+  private clampCursorToLastGrapheme(): void {
+    const { line, col } = this.getCurrentLineAndCol();
+    if (col < line.length) return;
+    const graphemes = getLineGraphemes(line);
+    this.moveCursorToCol(graphemes[graphemes.length - 1]?.start ?? 0);
+  }
+
+  /** Replace the selected lines with one empty line, then open insert there. */
+  private changeVisualLines(startLine: number, endLine: number): void {
+    const lines = this.getLines();
+    this.writeToRegister(this.getLinewisePayload(startLine, endLine));
+
+    const before = lines.slice(0, startLine);
+    const after = lines.slice(endLine + 1);
+    const cursorAbs = before.reduce((abs, line) => abs + line.length + 1, 0);
+    this.replaceTextInBuffer([...before, "", ...after].join("\n"), cursorAbs);
+  }
+
+  private applyVisualOperator(
+    operator: "d" | "y" | "c",
+    linewise: boolean,
+  ): void {
+    this.takeTotalCount(1);
+    // Visual edits are excluded from dot-repeat; drop the stale command so `.`
+    // cannot replay an older change the user has since moved past.
+    this.clearRepeatState();
+
+    // Both branches resolve the selection before dropping the anchor.
+    const anchor = this.getVisualAnchor();
+    const cursor = this.getCursor();
+
+    if (linewise) {
+      const { startLine, endLine } = getVisualLineRange(anchor, cursor);
+      this.visualAnchor = null;
+      if (operator === "c") {
+        this.setMode("insert");
+        this.changeVisualLines(startLine, endLine);
+        return;
+      }
+      this.setMode("normal");
+      if (operator === "d") {
+        this.deleteLineRange(startLine, endLine);
+        return;
+      }
+      this.yankLineRange(startLine, endLine);
+      // Vim only pulls the cursor to the start of the yanked lines when it is
+      // not already sitting on that end of the selection.
+      if (cursor.line >= anchor.line) this.moveCursorToLineStart(startLine);
+      return;
+    }
+
+    const { startAbs, endAbs } = this.getVisualCharwiseRange();
+    this.visualAnchor = null;
+    if (operator === "c") {
+      this.setMode("insert");
+      this.deleteRangeByAbsolute(startAbs, endAbs);
+      return;
+    }
+    this.setMode("normal");
+    if (operator === "d") {
+      this.deleteRangeByAbsolute(startAbs, endAbs);
+      this.clampCursorToLastGrapheme();
+      return;
+    }
+    this.yankRangeByAbsolute(startAbs, endAbs);
+    this.moveCursorToAbsoluteIndex(startAbs);
+  }
+
+  /** Swap the anchor and the cursor so the other end of the selection moves. */
+  private swapVisualEnds(): void {
+    const anchor = this.getVisualAnchor();
+    const cursor = this.getCursor();
+    this.visualAnchor = { line: cursor.line, col: cursor.col };
+    this.moveCursorToAbsoluteIndex(
+      this.getAbsoluteIndex(anchor.line, anchor.col),
+    );
+  }
+
+  /**
+   * Visual-mode keys that are not motions. Returns true when the key was
+   * consumed; motions and counts fall through to the normal-mode dispatch,
+   * which moves the cursor and thereby resizes the selection.
+   */
+  private handleVisualMode(data: string): boolean {
+    if (this.pendingG || this.pendingMotion) return false;
+
+    const linewise = this.mode === "visual-line";
+
+    switch (data) {
+      case "v":
+        if (linewise) this.setMode("visual");
+        else this.exitVisualMode();
+        return true;
+      case "V":
+        if (linewise) this.exitVisualMode();
+        else this.setMode("visual-line");
+        return true;
+      case "o":
+      case "O":
+        this.swapVisualEnds();
+        return true;
+      case "d":
+      case "x":
+        this.applyVisualOperator("d", linewise);
+        return true;
+      case "y":
+        this.applyVisualOperator("y", linewise);
+        return true;
+      case "c":
+      case "s":
+        this.applyVisualOperator("c", linewise);
+        return true;
+      case "D":
+      case "X":
+        this.applyVisualOperator("d", true);
+        return true;
+      case "Y":
+        this.applyVisualOperator("y", true);
+        return true;
+      case "C":
+      case "S":
+        this.applyVisualOperator("c", true);
+        return true;
+      default:
+        if (VISUAL_IGNORED_KEYS.has(data)) return true;
+        return matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_");
+    }
+  }
+
   private handleNormalMode(data: string): void {
     if (this.pendingG) {
       if (isDigit(data)) {
@@ -1550,7 +1757,7 @@ export class ModalEditor extends CustomEditor {
           return;
         }
 
-        if (data === "J") {
+        if (data === "J" && !isVisualMode(this.mode)) {
           this.joinLines(false);
           return;
         }
@@ -1682,6 +1889,11 @@ export class ModalEditor extends CustomEditor {
 
     if (data === "r") {
       this.pendingReplace = true;
+      return;
+    }
+
+    if (data === "v" || data === "V") {
+      this.enterVisualMode(data === "v" ? "visual" : "visual-line");
       return;
     }
 
@@ -3260,6 +3472,12 @@ export class ModalEditor extends CustomEditor {
 
     const prefixCount = this.prefixCount;
     const operatorCount = this.operatorCount;
+
+    if (isVisualMode(this.mode)) {
+      const name = this.mode === "visual" ? "VISUAL" : "V-LINE";
+      const pending = `${prefixCount}${this.pendingG ? `g${this.pendingGCount}` : ""}${this.pendingMotion ?? ""}`;
+      return pending ? ` ${name} ${pending}_ ` : ` ${name} `;
+    }
 
     if (this.pendingReplace) {
       return prefixCount ? ` NORMAL ${prefixCount}r_ ` : " NORMAL r_ ";

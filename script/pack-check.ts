@@ -96,9 +96,19 @@ const THRESHOLDS = {
   // 38700 -> 39300 and 167000 -> 168000 to fit with ~300 B / ~740 B
   // headroom (test files are excluded from the package). File count is now
   // at the maxFiles cap; the next new module needs a maxFiles bump too.
-  maxFiles: 16,
-  maxSize: 39300,
-  maxUnpackedSize: 168000,
+  //
+  // Visual mode (v / V): index.ts gains the visualAnchor state, the
+  // handleVisualMode dispatch branch, applyVisualOperator and its helpers,
+  // and the VISUAL / V-LINE labels; a new visual.ts holds the pure selection
+  // geometry; README gains a visual-mode reference section plus three
+  // known-difference rows. Measured: packed 38996 -> 42330 (+3334 B),
+  // unpacked 167258 -> 179171 (+11913 B), files 16 -> 17. README is inside
+  // the package `files` list, so its ~5 KB of new prose dominates the
+  // unpacked growth. Budgets bumped to 42800 / 180000 / 17, leaving ~470 B
+  // packed and ~829 B unpacked headroom.
+  maxFiles: 17,
+  maxSize: 42800,
+  maxUnpackedSize: 180000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

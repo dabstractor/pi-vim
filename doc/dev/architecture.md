@@ -24,6 +24,7 @@ flowchart TD
         textobjects["text-objects.ts — word / delimiter / matching-pair ranges"]
         wbcache["word-boundary-cache.ts — line-local word-boundary cache"]
         inputkeys["input-keys.ts — keyboard-input classification predicates"]
+        visual["visual.ts — visual-selection geometry"]
     end
 
     subgraph render["render / presentation"]
@@ -47,6 +48,7 @@ flowchart TD
     index --> textobjects
     index --> wbcache
     index --> inputkeys
+    index --> visual
     index --> cursorshape
     index --> modelabel
     index --> modecolors
@@ -59,6 +61,8 @@ flowchart TD
     motions --> types
     wbcache --> motions
     inputkeys --> motions
+    visual --> motions
+    visual --> types
     modelabel --> motions
     modecolors --> settings
     modechange --> settings
@@ -75,13 +79,14 @@ changing behavior.
 
 | module | owns | pure? |
 | --- | --- | --- |
-| `index.ts` | modal state machine, key dispatch, operators, undo/redo, dot-repeat, put/register, render composition, EX mini-mode, session hooks | no (all mutable state) |
+| `index.ts` | modal state machine, key dispatch, operators, undo/redo, dot-repeat, visual selection anchor, put/register, render composition, EX mini-mode, session hooks | no (all mutable state) |
 | `types.ts` | `Mode`, `CharMotion`, `PendingMotion`, `PendingOperator`, `LastCharMotion`, `NORMAL_KEYS` | n/a (types + constants) |
 | `settings.ts` | `PiVimSettings` shape + `readPiVimSettings` | reads settings |
 | `motions.ts` | char-find / word / paragraph motion targets, grapheme splitting | yes |
 | `text-objects.ts` | word / delimited / matching-pair range resolution | yes |
 | `word-boundary-cache.ts` | line-keyed cache of word-motion boundaries | stateful cache, no editor state |
 | `input-keys.ts` | escape/enter/backspace/printable/digit/count classification of a raw input chunk | yes |
+| `visual.ts` | anchor/cursor ordering, line-wise line range, grapheme-aware inclusive selection end, stale-anchor clamping | yes |
 | `cursor-shape.ts` | cursor-shape escape sequences, software-cursor marker stripping | render helpers |
 | `mode-label.ts` | grapheme-aware fitting of the footer mode label | yes |
 | `mode-colors.ts` | resolve/build per-mode colorizers from settings + theme | resolves config |
@@ -91,12 +96,16 @@ changing behavior.
 
 ## modal state machine
 
-`this.mode` is only ever `"insert"` or `"normal"`. EX mini-mode is not a
-third `Mode`: it is `this.mode === "normal"` with `pendingExCommand !==
-null`. `getActiveMode()` reports `"ex"` for border/label coloring, but the
-underlying mode stays `normal`, so mode-change shell hooks do not fire on
-EX entry/exit. Within normal mode, several short-lived *pending* sub-states
-capture the next key(s) of a multi-key command.
+`this.mode` is one of `"insert"`, `"normal"`, `"visual"`, or
+`"visual-line"`. EX mini-mode is not a fifth `Mode`: it is
+`this.mode === "normal"` with `pendingExCommand !== null`.
+`getActiveMode()` reports `"ex"` for border/label coloring and folds both
+visual modes onto `"normal"`, so EX entry/exit and visual entry/exit reuse
+the normal-mode colors. Mode-change shell hooks *do* fire on visual
+transitions (they receive `"visual"` / `"visual-line"` and run the
+`modeChange.normal` command) but not on EX entry/exit. Within normal mode,
+several short-lived *pending* sub-states capture the next key(s) of a
+multi-key command.
 
 ```mermaid
 stateDiagram-v2
@@ -105,6 +114,14 @@ stateDiagram-v2
     Normal --> Insert: i a o O A I s S C ...
     Normal --> Ex: ":"
     Ex --> Normal: Enter submits / Esc cancels
+    Normal --> Visual: v
+    Normal --> VisualLine: V
+    Visual --> Normal: Esc / v / d x y
+    VisualLine --> Normal: Esc / V / d x y
+    Visual --> VisualLine: V
+    VisualLine --> Visual: v
+    Visual --> Insert: c / s / C / S
+    VisualLine --> Insert: c / s / C / S
 
     state Normal {
         [*] --> Ready
@@ -122,6 +139,12 @@ stateDiagram-v2
         pendingExCommand holds the ":..." buffer.
         this.mode is still "normal"; only the
         active-mode color/label read as "ex".
+    end note
+
+    note right of Visual
+        visualAnchor holds the position where
+        v / V was pressed. Motions move only the
+        cursor; the selection is the pair.
     end note
 ```
 
@@ -167,8 +190,17 @@ flowchart TD
     mot -- yes --> doMot["handlePendingMotion"]
     mot -- no --> op{"pendingOperator d/c/y?"}
     op -- yes --> doOp["handlePendingDelete / Change / Yank"]
-    op -- no --> normal["handleNormalMode"]
+    op -- no --> vis{"visual mode?"}
+    vis -- yes --> doVis["handleVisualMode<br/>consumes v V o d x y c s D X Y C S<br/>and the inert keys"]
+    doVis -- "not consumed<br/>(motions, counts)" --> normal
+    vis -- no --> normal["handleNormalMode"]
 ```
+
+`handleVisualMode` returns a boolean rather than owning the whole key
+space: motions and counts deliberately fall through to `handleNormalMode`,
+so a visual selection resizes using exactly the same motion code paths as
+normal mode. It also declines to consume anything while `pendingG` or
+`pendingMotion` is set, which keeps `vgg` and `vfx` working.
 
 ### EX mini-mode dispatch
 
@@ -192,7 +224,14 @@ extension point for richer EX handling: new EX behavior slots in at
   / `performRedo` around the host editor's own history.
 - **dot-repeat**: a keystroke recorder (`repeatRecording`) captured by the
   dispatch wrap; `repeatLastCommand` replays the recorded key stream, with
-  a snapshot rollback if a replay fails.
+  a snapshot rollback if a replay fails. The recorder is disabled in visual
+  mode, and `applyVisualOperator` calls `clearRepeatState()` so a later `.`
+  cannot replay a normal-mode command the user has moved past.
+- **visual mode**: `visualAnchor` plus `this.mode`; `applyVisualOperator`
+  resolves the selection through `visual.ts` and then reuses the existing
+  `deleteRangeByAbsolute` / `yankRangeByAbsolute` / `deleteLineRange` /
+  `yankLineRange` primitives, so `Vd` and `dd` share their cursor
+  behaviour (and their known nvim divergence).
 - **put / register**: `unnamedRegister` plus the clipboard-mirror policy;
   `putAfter` / `putBefore` handle char-wise vs line-wise placement.
 - **render**: `render()` composes lines, fits the mode label

@@ -19,6 +19,7 @@ import installPiVim, {
 } from "../index.js";
 import type { WordMotionClass } from "../motions.js";
 import { setPiVimSettingsReaderForTests } from "../settings.js";
+import type { Mode } from "../types.js";
 import type {
   WordMotionDirection,
   WordMotionTarget,
@@ -709,7 +710,7 @@ function runScenario(
 ): {
   text: string;
   register: string;
-  editorMode: "normal" | "insert";
+  editorMode: Mode;
   cursorLine: number;
   cursorCol: number;
 } {
@@ -984,8 +985,8 @@ describe("mode transitions", () => {
 
 describe("mode change callback", () => {
   type ModeChangeEvent = {
-    mode: "normal" | "insert";
-    prev: "normal" | "insert";
+    mode: Mode;
+    prev: Mode;
   };
 
   it("fires on transitions only, with prev and new modes", () => {
@@ -7558,5 +7559,208 @@ describe("dot repeat — undo/redo interactions", () => {
     sendKeys(editor, ["u"]); // "ello"
     sendKeys(editor, ["\x12"]); // redo -> "llo"
     assert.equal(editor.getText(), "llo");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Visual mode. The nvim parity suite (test/nvim-parity-visual.ts) covers the
+// selection semantics against real nvim. These unit cases pin the behaviours
+// the oracle cannot reach: keys that are deliberately inert while a selection
+// is live, the footer label, escape not reaching the agent, and the fact that
+// visual edits take themselves out of the dot-repeat register.
+// ---------------------------------------------------------------------------
+
+describe("visual mode — entering and leaving", () => {
+  it("v and V report their modes and Escape returns to normal", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v"]);
+    assert.equal(editor.getMode(), "visual");
+    sendKeys(editor, ["\x1b"]);
+    assert.equal(editor.getMode(), "normal");
+
+    sendKeys(editor, ["V"]);
+    assert.equal(editor.getMode(), "visual-line");
+    sendKeys(editor, ["\x1b"]);
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("a pending count is dropped when visual mode starts (2v acts as v)", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["2", "v", "d"]);
+    assert.equal(editor.getText(), "ello");
+    assert.equal(editor.getRegister(), "h");
+  });
+
+  it("Escape cancels a pending char motion but stays in visual mode", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v", "f", "\x1b"]);
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it("Escape from visual mode is not forwarded to the agent", () => {
+    // `super.handleInput("\x1b")` only reaches onEscape when the keybindings
+    // manager claims the key as app.interrupt, so the stub must say so for
+    // this assertion to mean anything.
+    const interruptKeybindings = {
+      matches: (data: string, action: string) =>
+        data === "\x1b" && action === "app.interrupt",
+    } as unknown as ConstructorParameters<typeof ModalEditor>[2];
+    const create = () => {
+      const editor = new ModalEditor(stubTui, stubTheme, interruptKeybindings);
+      editor.setClipboardFn(() => undefined);
+      editor.setClipboardReadFn(() => null);
+      const seen: string[] = [];
+      editor.onEscape = () => seen.push("escape");
+      editor.handleInput("\x1b"); // insert -> normal (handled by the vim layer)
+      return { editor, seen };
+    };
+
+    const forwarded = create();
+    forwarded.editor.handleInput("\x1b"); // idle normal mode aborts the agent
+    assert.deepEqual(forwarded.seen, ["escape"]);
+
+    const swallowed = create();
+    sendKeys(swallowed.editor, ["v", "\x1b"]);
+    assert.equal(swallowed.editor.getMode(), "normal");
+    assert.deepEqual(swallowed.seen, []);
+  });
+
+  it("reports a block cursor shape while a selection is live", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v"]);
+    const shape = (
+      editor as unknown as { getDesiredCursorShapeSequence(): string }
+    ).getDesiredCursorShapeSequence();
+    assert.equal(shape, BLOCK_CURSOR_SHAPE);
+  });
+});
+
+describe("visual mode — footer label", () => {
+  it("shows VISUAL and V-LINE", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v"]);
+    assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL "));
+    sendKeys(editor, ["V"]);
+    assert.ok(editor.render(80).at(-1)?.endsWith(" V-LINE "));
+  });
+
+  it("echoes a pending count and a pending char motion", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v", "2"]);
+    assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL 2_ "));
+    sendKeys(editor, ["l", "f"]);
+    assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL f_ "));
+  });
+});
+
+describe("visual mode — inert normal-mode commands", () => {
+  const stays = (keys: string[]) => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v", ...keys]);
+    return editor;
+  };
+
+  it("u does not undo and does not leave visual mode", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x"]); // "ello"
+    sendKeys(editor, ["v", "u"]);
+    assert.equal(editor.getText(), "ello");
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it("ctrl+r does not redo while a selection is live", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x", "u"]); // back to "hello"
+    sendKeys(editor, ["v", "\x12"]);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it("p and P do not put the register", () => {
+    const { editor } = createEditorWithSpy("hello");
+    editor.setRegister("XY");
+    sendKeys(editor, ["v", "p", "P"]);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it("i, a, A and I do not open insert mode", () => {
+    for (const key of ["i", "a", "A", "I"]) {
+      const editor = stays([key]);
+      assert.equal(editor.getMode(), "visual", `${key} left visual mode`);
+      assert.equal(editor.getText(), "hello");
+    }
+  });
+
+  it("r does not start a pending replace", () => {
+    const editor = stays(["r", "Z"]);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it("J does not join lines, with or without a g prefix", () => {
+    const { editor } = createMultiLineEditor("abc\ndef");
+    sendKeys(editor, ["v", "J"]);
+    assert.equal(editor.getText(), "abc\ndef");
+    sendKeys(editor, ["g", "J"]);
+    assert.equal(editor.getText(), "abc\ndef");
+    assert.equal(editor.getMode(), "visual");
+  });
+
+  it(": does not open the EX mini-mode", () => {
+    const editor = stays([":"]);
+    assert.equal(editor.getMode(), "visual");
+    assert.ok(editor.render(80).at(-1)?.endsWith(" VISUAL "));
+  });
+
+  it("printable keys are swallowed rather than typed into the buffer", () => {
+    const editor = stays(["Z", "q"]);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "visual");
+  });
+});
+
+describe("visual mode — dot-repeat interaction", () => {
+  it("does not record a visual edit as the repeatable command", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["v", "l", "d"]); // "llo world"
+    assert.equal(editor.getText(), "llo world");
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "llo world");
+  });
+
+  it("clears an older repeatable command so '.' cannot replay it", () => {
+    const { editor } = createEditorWithSpy("hello world");
+    sendKeys(editor, ["x"]); // records `x` -> "ello world"
+    sendKeys(editor, ["v", "l", "d"]); // "lo world"
+    assert.equal(editor.getText(), "lo world");
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "lo world");
+  });
+
+  it("keeps the last change repeatable when visual mode is only entered", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["x"]); // "ello"
+    sendKeys(editor, ["v", "\x1b"]);
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "llo");
+  });
+});
+
+describe("visual mode — undo", () => {
+  it("a character-wise delete is a single undo step", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["v", "l", "l", "d"]);
+    assert.equal(editor.getText(), "lo");
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "hello");
+  });
+
+  it("a line-wise change is a single undo step", () => {
+    const { editor } = createMultiLineEditor("abc\ndef");
+    sendKeys(editor, ["V", "c", "\x1b"]);
+    assert.equal(editor.getText(), "\ndef");
+    sendKeys(editor, ["u"]);
+    assert.equal(editor.getText(), "abc\ndef");
   });
 });

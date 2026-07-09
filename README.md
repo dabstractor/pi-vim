@@ -81,7 +81,7 @@ npm run hooks:install
 
 ## stats
 
-- **193 commands**: motions, operators, counts, text objects, undo/redo, repeat, ex quit
+- **200 commands**: motions, operators, counts, text objects, undo/redo, repeat, visual mode, ex quit
 - **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
 - **0 dependencies**
 
@@ -109,7 +109,7 @@ Requires `@earendil-works/pi-tui >= 0.74.0`. With DECSCUSR support, cursor shape
 - REPL-focused defaults; out-of-scope boundaries documented.
 - Clipboard/register behavior is explicit and tested.
 
-Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim parity (visual mode, macros, search, extended ex-commands, …).
+Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim parity (visual-block mode, macros, search, extended ex-commands, …).
 
 ## common recipes
 
@@ -147,6 +147,9 @@ Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim par
 | `A` | Normal → Insert at line end |
 | `o` | Normal → open line below + Insert |
 | `O` | Normal → open line above + Insert |
+| `v` | Normal → character-wise Visual mode |
+| `V` | Normal → line-wise Visual mode |
+| `Esc` / `Ctrl+[` | Visual → Normal mode (never reaches Pi) |
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
@@ -346,6 +349,31 @@ Repeat tracks changes only; motions and yanks do not replace the previous repeat
 
 ---
 
+### visual mode
+
+`v` starts a character-wise selection and `V` a line-wise one, anchored where you pressed the key. Every normal-mode motion listed above moves the cursor and resizes the selection; counts work as usual (`v2ld`, `V2jd`).
+
+| key | action |
+|-----|--------|
+| `v` | Start a character-wise selection; in Visual mode exit, in V-Line switch to character-wise |
+| `V` | Start a line-wise selection; in V-Line exit, in Visual switch to line-wise |
+| `Esc` / `Ctrl+[` | Leave visual mode; the cursor stays where it is |
+| `o` / `O` | Swap the anchor and the cursor so the other end of the selection moves |
+| `d` / `x` | Delete the selection; the cursor lands on its first character |
+| `y` | Yank the selection; the cursor rewinds to its start |
+| `c` / `s` | Delete the selection and enter Insert mode |
+| `D` / `X` | Delete every touched line, even from a character-wise selection |
+| `Y` | Yank every touched line |
+| `C` / `S` | Replace every touched line with one empty line and enter Insert mode |
+
+**The selection is not highlighted.** The footer reads ` VISUAL ` or ` V-LINE ` and the block cursor marks the moving end, but the span between the anchor and the cursor renders as ordinary text. Selection highlighting needs a render-layer change and is deferred.
+
+Line-wise selections put a trailing newline in the register, so a following `p` pastes whole lines. A count typed before `v` or `V` is discarded rather than sizing the selection (`2v` behaves as `v`).
+
+Visual-mode edits are deliberately **not** dot-repeatable: running one clears the stored repeatable command, so a later `.` does nothing instead of replaying an unrelated change. Keys with no visual-mode meaning here — `p`, `P`, `r`, `J`, `u`, `<C-r>`, `.`, `:`, `i`, `a`, `A`, `I`, `~`, `>`, `<` — are inert while a selection is live rather than falling through to their normal-mode behaviour.
+
+---
+
 ## register and clipboard policy
 
 - `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
@@ -368,9 +396,12 @@ Repeat tracks changes only; motions and yanks do not replace the previous repeat
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
 | Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
-| Visual mode | Not implemented | `v`, `V`, `<C-v>` |
+| Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
+| Visual selection rendering | No highlight; only the footer label and the block cursor mark the selection | Selection is highlighted |
+| Visual line-wise delete | Leaves the cursor at column 0, like `dd` does today | Preserves the cursor column |
+| Visual dot-repeat | A visual edit clears the repeatable command; `.` afterwards does nothing | `.` repeats the operator over an equally sized region |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
-| `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, mixed-delimiter validation, or Visual `%` yet | Also supports percentage jumps and broader matching |
+| `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Registers / macros / search | Not implemented | Supported |
 | Ex commands | Quit-only EX mini-mode (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms) | Full ex command-line surface |
@@ -382,7 +413,10 @@ Repeat tracks changes only; motions and yanks do not replace the previous repeat
 
 Explicitly deferred:
 
-- Visual modes (`v`, `V`, block visual), including Visual `%`
+- Block visual mode (`<C-v>`)
+- Visual selection highlighting in the rendered prompt
+- Visual-mode `p`, `P`, `r`, `J`, `~`, `>`, `<`, `gv`, and `{count}v` selection sizing
+- Dot-repeat of a visual-mode operator
 - Tag text objects (`it`, `at`)
 - Paragraph/sentence text objects (`ip`, `ap`, `is`, `as`)
 - Angle bracket text objects (`i<`, `a<`) or angle-bracket `%` matching

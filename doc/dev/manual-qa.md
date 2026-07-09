@@ -426,6 +426,122 @@ waiting for a character argument takes the `.` as that argument.
 
 ---
 
+## group G — visual mode
+
+The selection semantics are parity-tested against real nvim in
+`test/nvim-parity-visual.ts`. What no automated test can check is that the
+footer, the cursor, and the *absence* of a selection highlight all behave as
+documented in a real terminal. G1 and G2 are TTY-only; treat them as
+priority alongside group A.
+
+### G1 — the footer names the visual mode (TTY-only)
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0`
+- keys: `v`, then `V`, then `<Esc>`
+- expect: the footer reads ` VISUAL `, then ` V-LINE `, then ` NORMAL `. The
+  label color matches the normal-mode color in both visual modes.
+- reset: `<Esc> gg dG`
+
+### G2 — the selection is not highlighted (TTY-only, known limitation)
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0`
+- keys: `v l l`
+- expect: the block cursor sits on the third `l`. The characters `ell`
+  between the anchor and the cursor render as **ordinary text** — there is no
+  highlight. This is the documented limitation, not a bug; the case exists so
+  a future highlight change has something to flip.
+- reset: `<Esc> gg dG`
+
+### G3 — `d` deletes the character-wise selection
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0` `l` (cursor on `e`)
+- keys: `v l l d`
+- expect: buffer `ho`, cursor on the `o` (the first character after the
+  deleted span), mode `NORMAL`.
+- reset: `<Esc> gg dG`
+
+### G4 — `y` rewinds the cursor to the start of the selection
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0` `l l l` (cursor on the second `l`)
+- keys: `v h h y`
+- expect: buffer unchanged, cursor back on `e` (the start of the selection),
+  mode `NORMAL`. A following `$ p` pastes `ell` after the last character.
+- reset: `<Esc> gg dG`
+
+### G5 — `c` opens insert mode over the selection
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0` `l`
+- keys: `v l c`, type `X`, `<Esc>`
+- expect: buffer `hXlo`, footer returns to ` NORMAL `.
+- reset: `<Esc> gg dG`
+
+### G6 — `o` swaps the ends of the selection
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0` `l`
+- keys: `v l l o l d`
+- expect: buffer `heo`. `o` moves the cursor back to the anchor end, so the
+  following `l` shrinks the selection from the left instead of growing it.
+- reset: `<Esc> gg dG`
+
+### G7 — `V` selects whole lines and `d` removes them
+
+- seed: the 3-line seed, then `j` (cursor on line 2).
+- keys: `V j d`
+- expect: only `abc def` remains. The register holds two whole lines, so a
+  following `p` re-inserts them below line 1.
+- reset: `<Esc> gg dG`
+
+### G8 — uppercase operators force a line-wise edit
+
+- seed: the 3-line seed, cursor on line 1 column 2.
+- keys: `v D`
+- expect: line 1 is gone entirely even though the selection was
+  character-wise and one character wide.
+- reset: `<Esc> gg dG`
+
+### G9 — a count applies to the motion, not to `v`
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0`
+- keys: `v 2 l d`
+- expect: buffer `lo`. While the count is pending the footer reads
+  ` VISUAL 2_ `.
+- reset: `<Esc> gg dG`
+
+### G10 — `Esc` leaves visual mode without reaching Pi
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0`
+- keys: `v`, then `<Esc>`
+- expect: the footer returns to ` NORMAL ` and the agent is **not**
+  interrupted. Pressing `<Esc>` once more from idle normal mode does abort the
+  agent, which is the pre-existing behavior.
+- reset: `<Esc> gg dG`
+
+### G11 — inert keys do nothing while a selection is live
+
+- seed: `i` type `"hello"` `<Esc>` `gg 0` `x` — buffer `ello`, register `h`.
+- keys: `v`, then in turn `u`, `<C-r>`, `p`, `P`, `r`, `J`, `:`, `i`, `a`,
+  `A`, `I`, `.`, `~`, `>`, `<`, `Z`
+- expect: after every one of those keys the buffer is still `ello` and the
+  footer still reads ` VISUAL `. In particular `u` does not undo the `x`, `p`
+  does not paste `h`, `:` does not open the EX mini-mode, `i` does not enter
+  insert mode, and `Z` is not typed into the buffer.
+- reset: `<Esc> gg dG`
+
+### G12 — a visual edit takes itself out of dot repeat
+
+No fresh session needed here: the visual delete is exactly what clears the
+repeat memory, so whatever the seed recorded is irrelevant.
+
+- seed: `i` type `"hello world"` `<Esc>` `gg 0`
+- keys: `x` (buffer `ello world`), then `v l d` (buffer `lo world`), then `.`
+- expect: the final `.` does nothing — the buffer stays `lo world`. The
+  visual delete cleared the stored repeatable `x` rather than leaving it
+  armed. Control: on a fresh seed, `x` then `.` gives `llo world`, so `.`
+  really was armed before the visual edit.
+- reset: `<Esc> gg dG`
+
+---
+
 ## coverage map
 
 | area | automated | manual only |
@@ -435,6 +551,8 @@ waiting for a character argument takes the `.` as that argument.
 | dot repeat semantics | `npm test`, `npm run test:nvim` | — |
 | `.` as a command argument | `npm test`, `npm run test:nvim` | — |
 | failed char-motion abort | `npm test` | — |
+| visual-mode selection semantics | `npm test`, `npm run test:nvim` | — |
+| visual-mode footer + missing highlight | `test/modal-editor.test.ts` (label string only) | G1, G2 |
 | footer mode label | `test/mode-label.test.ts` (fitting only) | A1, A2 |
 | cursor shape / software cursor | `test/cursor-shape.test.ts` (strings only) | A3 |
 | paste cancels a pending command | `test/dot-repeat-review.test.ts` (simulated) | A4 |
