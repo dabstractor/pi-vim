@@ -206,6 +206,7 @@ export class ModalEditor extends CustomEditor {
   private pendingExCommand: string | null = null;
   private acceptingBracketedPasteInExCommand: boolean = false;
   private pendingEscWhileAcceptingBracketedPasteInExCommand: boolean = false;
+  private discardingPasteAfterNewlineInExCommand: boolean = false;
   private lastCharMotion: LastCharMotion | null = null;
   private discardingBracketedPasteInNormalMode: boolean = false;
   private pendingEscWhileDiscardingBracketedPasteInNormalMode: boolean = false;
@@ -761,8 +762,7 @@ export class ModalEditor extends CustomEditor {
 
   private startPendingExCommand(): void {
     this.pendingExCommand = ":";
-    this.acceptingBracketedPasteInExCommand = false;
-    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    this.endBracketedPasteInExCommand();
   }
 
   private clearPendingExCommand(): void {
@@ -771,8 +771,7 @@ export class ModalEditor extends CustomEditor {
       this.pendingEscWhileAcceptingBracketedPasteInExCommand;
 
     this.pendingExCommand = null;
-    this.acceptingBracketedPasteInExCommand = false;
-    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    this.endBracketedPasteInExCommand();
 
     if (shouldDiscardBracketedPasteTail) {
       this.discardingBracketedPasteInNormalMode = true;
@@ -792,6 +791,27 @@ export class ModalEditor extends CustomEditor {
     this.clearPendingExCommand();
   }
 
+  private endBracketedPasteInExCommand(): void {
+    this.acceptingBracketedPasteInExCommand = false;
+    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    this.discardingPasteAfterNewlineInExCommand = false;
+  }
+
+  /**
+   * First-line-wait: a pasted newline never submits. The payload up to the
+   * first newline becomes the pending command; the rest of that paste is
+   * dropped. Only a typed Enter reaches `submitPendingExCommand`.
+   */
+  private takePastedExCommandText(payload: string): string {
+    if (this.discardingPasteAfterNewlineInExCommand) return "";
+
+    const newline = payload.search(/[\r\n]/);
+    if (newline === -1) return payload;
+
+    this.discardingPasteAfterNewlineInExCommand = true;
+    return payload.slice(0, newline);
+  }
+
   private normalizePendingExCommandInput(data: string): string | null {
     let chunk = data;
     let normalized = "";
@@ -800,8 +820,7 @@ export class ModalEditor extends CustomEditor {
       if (this.acceptingBracketedPasteInExCommand) {
         if (this.pendingEscWhileAcceptingBracketedPasteInExCommand) {
           if (chunk.startsWith(BRACKETED_PASTE_END_TAIL)) {
-            this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
-            this.acceptingBracketedPasteInExCommand = false;
+            this.endBracketedPasteInExCommand();
             chunk = chunk.slice(BRACKETED_PASTE_END_TAIL.length);
             if (chunk.length === 0) {
               return normalized.length > 0 ? normalized : null;
@@ -809,14 +828,14 @@ export class ModalEditor extends CustomEditor {
             continue;
           }
 
-          normalized += "\x1b";
+          normalized += this.takePastedExCommandText("\x1b");
           this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
         }
 
         const end = chunk.indexOf(BRACKETED_PASTE_END);
         if (end !== -1) {
-          normalized += chunk.slice(0, end);
-          this.acceptingBracketedPasteInExCommand = false;
+          normalized += this.takePastedExCommandText(chunk.slice(0, end));
+          this.endBracketedPasteInExCommand();
           chunk = chunk.slice(end + BRACKETED_PASTE_END.length);
           if (chunk.length === 0) {
             return normalized.length > 0 ? normalized : null;
@@ -829,7 +848,7 @@ export class ModalEditor extends CustomEditor {
           return normalized.length > 0 ? normalized : null;
         }
 
-        normalized += chunk;
+        normalized += this.takePastedExCommandText(chunk);
         return normalized.length > 0 ? normalized : null;
       }
 

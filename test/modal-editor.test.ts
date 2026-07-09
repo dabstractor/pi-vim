@@ -1442,10 +1442,25 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
-  it("newline in bracketed paste submits the pending ex command", () => {
+  const pendingExLabel = (session: {
+    editor: { render(w: number): string[] };
+  }) => session.editor.render(80).at(-1);
+
+  it("newline in bracketed paste does not submit the pending ex command", () => {
     const session = createEditorWithSpy("hello");
 
     sendKeys(session.editor, [":", "\x1b[200~q!\n\x1b[201~"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :q!_ "));
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("typed enter after a pasted newline submits the first pasted line", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~q!\nrest\x1b[201~", "\r"]);
 
     assert.equal(session.quitCalls, 1);
     assert.equal(session.editor.getMode(), "normal");
@@ -1453,7 +1468,16 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
-  it("newline submit in split bracketed paste discards the trailing paste marker", () => {
+  it("text after a pasted newline is discarded, not appended", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~q\nall!\x1b[201~"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :q_ "));
+  });
+
+  it("pasted newline in a split paste waits for a typed enter", () => {
     const session = createEditorWithSpy("hello");
     const customEditorProto = Object.getPrototypeOf(
       Object.getPrototypeOf(session.editor),
@@ -1470,17 +1494,90 @@ describe("ex mini-mode", () => {
     };
 
     try {
-      sendKeys(session.editor, [":", "\x1b[200~q!\n", "\x1b", "[201~", "x"]);
+      sendKeys(session.editor, [":", "\x1b[200~q!\n", "\x1b", "[201~"]);
+
+      assert.equal(session.quitCalls, 0);
+      assert.equal(forwardedEscapeCount, 0);
+      assert.ok(pendingExLabel(session)?.endsWith(" EX :q!_ "));
+
+      sendKeys(session.editor, ["\r"]);
 
       assert.equal(session.quitCalls, 1);
-      assert.equal(forwardedEscapeCount, 0);
       assert.equal(session.editor.getMode(), "normal");
-      assert.equal(session.editor.getText(), "ello");
-      assert.equal(session.editor.getRegister(), "h");
+      assert.equal(session.editor.getText(), "hello");
       assert.deepEqual(session.notifications, []);
     } finally {
       customEditorProto.handleInput = originalHandleInput;
     }
+  });
+
+  it("payload split across chunks keeps only the first pasted line", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [
+      ":",
+      "\x1b[200~q",
+      "a!",
+      "\nrest",
+      "more",
+      "\x1b[201~",
+    ]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :qa!_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("a paste that begins with a newline leaves the ex line empty", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~\nq!\x1b[201~"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :_ "));
+  });
+
+  it("typing continues after a discarded paste tail", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [
+      ":",
+      "\x1b[200~q\nrest\x1b[201~",
+      "a",
+      "!",
+      "\r",
+    ]);
+
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("a pasted crlf truncates at the carriage return", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [":", "\x1b[200~q!\r\nrest\x1b[201~"]);
+
+    assert.equal(session.quitCalls, 0);
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :q!_ "));
+  });
+
+  it("each paste contributes its own first line", () => {
+    const session = createEditorWithSpy("hello");
+
+    sendKeys(session.editor, [
+      ":",
+      "\x1b[200~q\nX\x1b[201~",
+      "\x1b[200~a!\nY\x1b[201~",
+    ]);
+
+    assert.ok(pendingExLabel(session)?.endsWith(" EX :qa!_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.equal(session.quitCalls, 1);
+    assert.deepEqual(session.notifications, []);
   });
 
   it("empty submit is a silent no-op", () => {

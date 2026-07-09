@@ -206,8 +206,9 @@ normal mode. It also declines to consume anything while `pendingG` or
 
 `:` in normal mode calls `startPendingExCommand()`, seeding the buffer with
 `":"`. Subsequent keys append through `handlePendingExCommand` (with the
-paste/newline wait policy applied in the pre-pass). `Esc` cancels;
-`Enter` calls `submitPendingExCommand()`, which:
+paste/newline wait policy applied in the pre-pass, so a pasted newline is
+truncated away rather than submitting). `Esc` cancels; a **typed** `Enter` —
+the only thing that can submit — calls `submitPendingExCommand()`, which:
 
 1. strips the leading `:`, trims, and detects a trailing `!` (force);
 2. if the name is a reserved quit name (`q`, `qa`, `quit`, `qall`,

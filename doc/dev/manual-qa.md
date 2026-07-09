@@ -167,6 +167,27 @@ widgets, or a second extension in the process. Run this group first.
   pi-vim did not author.
 - reset: `<Esc> gg dG`, then quit and relaunch the single-extension session.
 
+### A8 — a pasted newline never submits an ex command
+
+This is the safety property the ex command line depends on. Only a real
+terminal sends the bracketed-paste markers, so no automated test can drive
+the actual paste path end to end.
+
+- fresh session.
+- seed: copy the two lines `q!` and `rest` (including the newline between
+  them, and any trailing newline) to the system clipboard.
+- keys: press `<Esc>`, then `:` (footer shows ` EX :_ `), then paste with the
+  terminal's paste shortcut.
+- expect: the session does **not** quit. The footer reads ` EX :q!_ ` — the
+  text up to the first pasted newline became the pending command and `rest`
+  was discarded.
+- keys: press `<Enter>`.
+- expect: now the session quits. A typed `Enter` is the only thing that
+  submits.
+- notes: repeat with a clipboard whose first line is empty (a leading
+  newline); the footer must stay ` EX :_ `. Relaunch after each quit.
+- reset: none needed — the session has exited.
+
 ---
 
 ## group B — put cursor position
@@ -559,6 +580,7 @@ repeat memory, so whatever the seed recorded is irrelevant.
 | autocomplete cancels a recording | `test/dot-repeat-review.test.ts` (simulated) | A5 |
 | submit is not repeatable | `test/dot-repeat-review.test.ts` | A6 |
 | host text injection cancels | `test/dot-repeat-review.test.ts` (simulated) | A7 |
+| pasted newline never submits an ex command | `test/modal-editor.test.ts` (simulated markers) | A8 |
 
 Group A is the priority. Everything below it has a green automated
 counterpart and is here to catch a difference between the harness and a real
