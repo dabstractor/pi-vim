@@ -299,3 +299,8 @@ dispatch is transparent to the buffer, the cursor, undo, redo, and `.`.
   register, pinning pi-vim's behavior to the reference editor.
 - `test/**` is excluded from the npm package, so tests never affect the
   `pack:check` size budget.
+- `npm run scoreboard` re-derives `doc/dev/scoreboard.md` from those two
+  suites plus `script/perf-bench.ts` and `npm pack --dry-run`: the
+  committed snapshot of parity coverage, known gaps, per-keystroke cost,
+  and published footprint. It refuses to publish a red tree, and every
+  number in it is generated rather than transcribed.
