@@ -84,6 +84,8 @@ export type ExtensionApiHarness = ExtensionAPI & {
   handlersFor(event: string): ExtensionHandlerStub[];
   emit(event: string, payload?: unknown, ctx?: unknown): Promise<unknown[]>;
   eventBusEmissions(): Array<{ event: string; data: unknown }>;
+  /** Stub the extension/prompt/skill commands `pi.getCommands()` reports. */
+  setCommands(names: readonly string[]): void;
 };
 
 type ExtensionHandlerStub = (event: unknown, ctx: unknown) => unknown;
@@ -93,8 +95,15 @@ export function createExtensionApiHarness(): ExtensionApiHarness {
   const handlers = new Map<string, ExtensionHandlerStub[]>();
   const eventBusHandlers = new Map<string, EventBusHandlerStub[]>();
   const eventBusEmissions: Array<{ event: string; data: unknown }> = [];
+  let commands: Array<{ name: string }> = [];
 
   const harness = {
+    getCommands(): Array<{ name: string }> {
+      return commands;
+    },
+    setCommands(names: readonly string[]): void {
+      commands = names.map((name) => ({ name }));
+    },
     events: {
       on(event: string, handler: EventBusHandlerStub): void {
         const eventHandlers = eventBusHandlers.get(event) ?? [];

@@ -239,6 +239,7 @@ type InstalledExtension = {
   emitShutdown(event?: { type?: string; reason?: string }): Promise<void>;
   readonly sessionShutdownHandlerCount: number;
   readonly sessionEndHandlerCount: number;
+  setCommands(names: readonly string[]): void;
 };
 
 function createRecordingTheme(
@@ -296,6 +297,7 @@ async function installExtensionWithEditorFactory(
   return {
     editorFactory,
     eventBusEmissions: () => pi.eventBusEmissions(),
+    setCommands: (names: readonly string[]) => pi.setCommands(names),
     get notificationCalls() {
       return notificationCalls;
     },
@@ -1623,6 +1625,438 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, ["Unsupported ex command: :wq"]);
     assert.equal(session.editor.getText(), "hello");
     assert.deepEqual(session.editor.getCursor(), { line: 0, col: 2 });
+  });
+});
+
+describe("ex pi-command bridge", () => {
+  type BridgeSession = ReturnType<typeof createEditorWithSpy> & {
+    dispatched: string[];
+  };
+
+  function createBridgeSession(
+    initialText: string,
+    knownCommands: readonly string[] = ["tree", "model"],
+  ): BridgeSession {
+    const session = createEditorWithSpy(initialText);
+    const dispatched: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(knownCommands));
+    session.editor.setRunCommandFn((commandLine) => {
+      dispatched.push(commandLine);
+      // Every real dispatch route clears the prompt before running.
+      session.editor.setText("");
+    });
+    // Object.assign, not a spread: `quitCalls` is a getter on the session.
+    return Object.assign(session, { dispatched });
+  }
+
+  function runEx(editor: ModalEditor, command: string): void {
+    sendKeys(editor, [":", ...command.split(""), "\r"]);
+  }
+
+  it("dispatches a known pi command as a slash command", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "tree");
+
+    assert.deepEqual(session.dispatched, ["/tree"]);
+    assert.deepEqual(session.notifications, []);
+    assert.equal(session.editor.getMode(), "normal");
+  });
+
+  it("passes arguments after the first whitespace run verbatim", () => {
+    const session = createBridgeSession("", ["model"]);
+
+    runEx(session.editor, "model  claude  opus ");
+
+    assert.deepEqual(session.dispatched, ["/model claude  opus"]);
+  });
+
+  it("dispatches a bare name when the args are whitespace only", () => {
+    const session = createBridgeSession("", ["model"]);
+
+    runEx(session.editor, "model   ");
+
+    assert.deepEqual(session.dispatched, ["/model"]);
+  });
+
+  it("routes dispatch through the editor submit path by default", () => {
+    const session = createEditorWithSpy("");
+    const submitted: string[] = [];
+    const textAtSubmit: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(["tree"]));
+    session.editor.onSubmit = (text) => {
+      submitted.push(text);
+      textAtSubmit.push(session.editor.getText());
+      session.editor.setText("");
+    };
+
+    runEx(session.editor, "tree");
+
+    assert.deepEqual(submitted, ["/tree"]);
+    // The buffer holds the command line while the submit handler runs, exactly
+    // as if the user had typed `/tree` and pressed Enter.
+    assert.deepEqual(textAtSubmit, ["/tree"]);
+  });
+
+  it("dispatches builtin names without any registered extension command", () => {
+    const session = createEditorWithSpy("");
+    const submitted: string[] = [];
+    session.editor.onSubmit = (text) => {
+      submitted.push(text);
+      session.editor.setText("");
+    };
+
+    runEx(session.editor, "compact");
+    runEx(session.editor, "hotkeys");
+
+    assert.deepEqual(submitted, ["/compact", "/hotkeys"]);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("reserves future vim ex names instead of dispatching them", () => {
+    for (const name of ["s", "g", "v", "d", "m", "t", "co", "j", "w", "r"]) {
+      const session = createBridgeSession("", [name]);
+
+      runEx(session.editor, name);
+
+      assert.deepEqual(session.dispatched, []);
+      assert.deepEqual(session.notifications, [
+        `Reserved ex command: :${name}`,
+      ]);
+    }
+  });
+
+  it("reserves the long-form vim ex names normal and sort", () => {
+    const session = createBridgeSession("", ["normal", "sort"]);
+
+    runEx(session.editor, "normal");
+    runEx(session.editor, "sort");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, [
+      "Reserved ex command: :normal",
+      "Reserved ex command: :sort",
+    ]);
+  });
+
+  it("reserves a forced vim ex name", () => {
+    const session = createBridgeSession("", ["w"]);
+
+    runEx(session.editor, "w!");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, ["Reserved ex command: :w!"]);
+  });
+
+  it("reserves a name even when a pi command of that name exists", () => {
+    const session = createBridgeSession("", ["w", "tree"]);
+
+    runEx(session.editor, "w");
+    runEx(session.editor, "tree");
+
+    assert.deepEqual(session.dispatched, ["/tree"]);
+    assert.deepEqual(session.notifications, ["Reserved ex command: :w"]);
+  });
+
+  it("rejects an unknown name without dispatching or messaging the agent", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "unknownxyz");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, [
+      "Unsupported ex command: :unknownxyz",
+    ]);
+  });
+
+  it("rejects a trailing bang on a non-reserved command name", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "tree!");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :tree!"]);
+  });
+
+  it("keeps quit names out of the bridge even though /quit is a builtin", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "quit");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.equal(session.quitCalls, 1);
+  });
+
+  it("restores the composed prompt and cursor after a dispatch", () => {
+    const session = createBridgeSession("hello world");
+    sendKeys(session.editor, ["0", "l", "l"]);
+
+    runEx(session.editor, "tree");
+
+    assert.equal(session.editor.getText(), "hello world");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("restores a multi-line prompt after a dispatch", () => {
+    const session = createBridgeSession("line one");
+    sendKeys(session.editor, ["o", ..."line two".split(""), "\x1b"]);
+    sendKeys(session.editor, ["k", "0", "l"]);
+
+    runEx(session.editor, "tree");
+
+    assert.equal(session.editor.getText(), "line one\nline two");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("leaves the undo stack where it was before the dispatch", () => {
+    // The dispatch's own setText("") would otherwise sit on the undo stack and
+    // swallow this `u`, making the first undo after any command a silent no-op.
+    const session = createBridgeSession("hello");
+    sendKeys(session.editor, ["x"]);
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["u"]);
+
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("consumes no more undo steps than a session with no dispatch", () => {
+    const undoStepsToEmpty = (dispatch: boolean): number => {
+      const session = createBridgeSession("hello");
+      sendKeys(session.editor, ["x"]);
+      if (dispatch) runEx(session.editor, "tree");
+
+      let steps = 0;
+      while (session.editor.getText() !== "" && steps < 10) {
+        sendKeys(session.editor, ["u"]);
+        steps++;
+      }
+      return steps;
+    };
+
+    assert.equal(undoStepsToEmpty(true), undoStepsToEmpty(false));
+  });
+
+  it("preserves the redo stack across a dispatch", () => {
+    const session = createBridgeSession("hello");
+    sendKeys(session.editor, ["x", "u"]);
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["\x12"]);
+
+    assert.equal(session.editor.getText(), "ello");
+  });
+
+  it("keeps the repeatable command armed across a dispatch", () => {
+    const session = createBridgeSession("hello");
+    sendKeys(session.editor, ["x"]);
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["."]);
+
+    assert.equal(session.editor.getText(), "llo");
+  });
+
+  it("restores the prompt when the dispatch throws", () => {
+    const session = createBridgeSession("keep me");
+    session.editor.setRunCommandFn(() => {
+      session.editor.setText("");
+      throw new Error("dispatch failed");
+    });
+
+    assert.throws(() => runEx(session.editor, "tree"), /dispatch failed/);
+    assert.equal(session.editor.getText(), "keep me");
+  });
+
+  it("cannot restore a prompt a dispatch route clears asynchronously", async () => {
+    // Characterization, not an endorsement: pi's builtin and extension routes
+    // both clear the buffer synchronously before their first await, so the
+    // restore below wins. A route that cleared after an await would defeat it —
+    // that is what copyInputToClipboard exists for.
+    const session = createBridgeSession("compose");
+    session.editor.setRunCommandFn(() => {
+      void Promise.resolve().then(() => session.editor.setText(""));
+    });
+
+    runEx(session.editor, "tree");
+    assert.equal(session.editor.getText(), "compose");
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(session.editor.getText(), "");
+  });
+
+  it("copies the prompt to the clipboard when copyInputToClipboard is on", async () => {
+    const session = createBridgeSession("secret prompt");
+    // Independent of the mirror policy: this is its own opt-in setting.
+    session.editor.setClipboardMirrorPolicy("never");
+    session.editor.setExCommandSettings({
+      piDispatch: true,
+      copyInputToClipboard: true,
+    });
+
+    runEx(session.editor, "tree");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(session.clipboardWrites, ["secret prompt"]);
+    assert.deepEqual(session.dispatched, ["/tree"]);
+  });
+
+  it("skips the clipboard copy when the prompt is empty", async () => {
+    const session = createBridgeSession("");
+    session.editor.setExCommandSettings({
+      piDispatch: true,
+      copyInputToClipboard: true,
+    });
+
+    runEx(session.editor, "tree");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(session.clipboardWrites, []);
+  });
+
+  it("does not touch the clipboard by default", async () => {
+    const session = createBridgeSession("secret prompt");
+
+    runEx(session.editor, "tree");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(session.clipboardWrites, []);
+  });
+
+  it("falls back to quit-only behavior when piDispatch is off", () => {
+    const session = createBridgeSession("");
+    session.editor.setExCommandSettings({
+      piDispatch: false,
+      copyInputToClipboard: false,
+    });
+
+    runEx(session.editor, "tree");
+    runEx(session.editor, "q");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :tree"]);
+    assert.equal(session.quitCalls, 1);
+  });
+
+  it("does not dispatch a pasted command name without a typed enter", () => {
+    const session = createBridgeSession("");
+
+    sendKeys(session.editor, [":", "\x1b[200~tree\nrest\x1b[201~"]);
+
+    assert.deepEqual(session.dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :tree_ "));
+
+    sendKeys(session.editor, ["\r"]);
+
+    assert.deepEqual(session.dispatched, ["/tree"]);
+  });
+
+  it("unions builtin names with the commands pi reports at submit time", async () => {
+    const restoreSettings = setPiVimSettingsReaderForTests(() => ({}));
+
+    try {
+      const extension = await installExtensionWithEditorFactory();
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      const submitted: string[] = [];
+      editor.onSubmit = (text) => {
+        submitted.push(text);
+        editor.setText("");
+      };
+
+      editor.handleInput("\x1b");
+      extension.setCommands(["my-skill"]);
+
+      runEx(editor, "tree"); // builtin, absent from getCommands()
+      runEx(editor, "my-skill"); // registered extension/skill command
+      runEx(editor, "absent"); // in neither source
+
+      assert.deepEqual(submitted, ["/tree", "/my-skill"]);
+      assert.deepEqual(extension.notifications, [
+        { message: "Unsupported ex command: :absent", type: "warning" },
+      ]);
+    } finally {
+      restoreSettings();
+    }
+  });
+
+  it("sees a command registered after the editor was created", async () => {
+    const restoreSettings = setPiVimSettingsReaderForTests(() => ({}));
+
+    try {
+      const extension = await installExtensionWithEditorFactory();
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      const submitted: string[] = [];
+      editor.onSubmit = (text) => {
+        submitted.push(text);
+        editor.setText("");
+      };
+
+      editor.handleInput("\x1b");
+      runEx(editor, "late-command");
+      extension.setCommands(["late-command"]);
+      runEx(editor, "late-command");
+
+      assert.deepEqual(submitted, ["/late-command"]);
+      assert.deepEqual(extension.notifications, [
+        { message: "Unsupported ex command: :late-command", type: "warning" },
+      ]);
+    } finally {
+      restoreSettings();
+    }
+  });
+
+  it("turns the bridge off from project settings", async () => {
+    const restoreSettings = setPiVimSettingsReaderForTests(() => ({
+      exCommand: { piDispatch: false },
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory();
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+      const submitted: string[] = [];
+      editor.onSubmit = (text) => submitted.push(text);
+
+      editor.handleInput("\x1b");
+      runEx(editor, "tree");
+
+      assert.deepEqual(submitted, []);
+      assert.deepEqual(extension.notifications, [
+        { message: "Unsupported ex command: :tree", type: "warning" },
+      ]);
+    } finally {
+      restoreSettings();
+    }
+  });
+
+  it("warns once when the exCommand setting is invalid", async () => {
+    const restoreSettings = setPiVimSettingsReaderForTests(() => ({
+      exCommand: { piDispatch: "yes" },
+    }));
+
+    try {
+      const extension = await installExtensionWithEditorFactory();
+
+      assert.deepEqual(extension.notifications, [
+        {
+          message: "Invalid piVim.exCommand piDispatch; expected a boolean.",
+          type: "warning",
+        },
+      ]);
+    } finally {
+      restoreSettings();
+    }
   });
 });
 

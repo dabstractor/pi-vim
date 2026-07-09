@@ -60,7 +60,12 @@ import {
   reverseCharMotion,
   type WordMotionClass,
 } from "./motions.js";
-import { readPiVimSettings } from "./settings.js";
+import {
+  DEFAULT_EX_COMMAND_SETTINGS,
+  type ExCommandSettings,
+  readPiVimSettings,
+  resolveExCommandSettings,
+} from "./settings.js";
 import {
   resolveDelimitedTextObjectRange,
   resolveMatchingPairMotionTarget,
@@ -152,6 +157,34 @@ const VISUAL_IGNORED_KEYS = new Set([
   CTRL_UNDERSCORE,
 ]);
 
+// Pi's builtin slash commands. `pi.getCommands()` reports only extension,
+// prompt and skill commands; the builtin list is not re-exported from the
+// package's public entry point, so it is mirrored here. A name missing from
+// this mirror simply falls through to "Unsupported ex command".
+const EX_BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  "settings",
+  "model",
+  "scoped-models",
+  "export",
+  "import",
+  "share",
+  "copy",
+  "name",
+  "session",
+  "changelog",
+  "hotkeys",
+  "fork",
+  "clone",
+  "tree",
+  "login",
+  "logout",
+  "new",
+  "compact",
+  "resume",
+  "reload",
+  "quit",
+]);
+
 type EditorSnapshot = {
   text: string;
   cursor: { line: number; col: number };
@@ -183,6 +216,7 @@ type ModalEditorInternals = {
   tui?: { requestRender?: () => void };
   pushUndoSnapshot?: () => void;
   setCursorCol?: (col: number) => void;
+  undoStack?: { readonly length: number; pop(): unknown };
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
@@ -236,6 +270,19 @@ export class ModalEditor extends CustomEditor {
   private quitFn: () => void = () => {};
   private notifyFn: (message: string) => void = () => {};
   private modeChangeFn: (mode: Mode, prevMode: Mode) => void = () => {};
+  private exCommandSettings: ExCommandSettings = DEFAULT_EX_COMMAND_SETTINGS;
+  private commandNamesFn: () => ReadonlySet<string> = () =>
+    EX_BUILTIN_COMMAND_NAMES;
+  // Pi has no public command-dispatch API. The editor's own submit path is the
+  // one mechanism that reaches every command kind (builtin, extension, skill,
+  // prompt), so dispatching `:name` is literally the user typing `/name` and
+  // pressing Enter. Injectable so tests need no live pi runtime.
+  private runCommandFn: (commandLine: string) => void = (commandLine) => {
+    const submit = this.onSubmit;
+    if (!submit) return;
+    this.setText(commandLine);
+    submit(commandLine);
+  };
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -277,6 +324,15 @@ export class ModalEditor extends CustomEditor {
   }
   setModeChangeFn(fn: (mode: Mode, prevMode: Mode) => void): void {
     this.modeChangeFn = fn;
+  }
+  setRunCommandFn(fn: (commandLine: string) => void): void {
+    this.runCommandFn = fn;
+  }
+  setCommandNamesFn(fn: () => ReadonlySet<string>): void {
+    this.commandNamesFn = fn;
+  }
+  setExCommandSettings(settings: ExCommandSettings): void {
+    this.exCommandSettings = settings;
   }
   getRegister(): string {
     return this.unnamedRegister;
@@ -1209,14 +1265,36 @@ export class ModalEditor extends CustomEditor {
     "quitall",
   ]);
 
+  // Names pi-vim claims for real vim ex semantics later. They are never
+  // dispatched to Pi, so a `/s` or `/w` extension installed today cannot
+  // shadow a future `:s` substitute or `:w` write.
+  private static readonly EX_RESERVED_NAMES = new Set([
+    "s",
+    "g",
+    "v",
+    "d",
+    "m",
+    "t",
+    "co",
+    "j",
+    "w",
+    "r",
+    "normal",
+    "sort",
+    "&",
+    ">",
+    "<",
+  ]);
+
   private submitPendingExCommand(): void {
     const command = this.pendingExCommand?.slice(1).trim() ?? "";
     this.clearPendingExCommand();
+    if (!command) return;
 
     const force = command.endsWith("!");
-    const name = force ? command.slice(0, -1) : command;
+    const quitName = force ? command.slice(0, -1) : command;
 
-    if (ModalEditor.EX_QUIT_NAMES.has(name)) {
+    if (ModalEditor.EX_QUIT_NAMES.has(quitName)) {
       if (!force && this.hasNonEmptyPrompt()) {
         this.notifyFn(`Prompt is not empty; use :${command}! to quit anyway`);
         return;
@@ -1226,8 +1304,55 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
-    if (command) {
-      this.notifyFn(`Unsupported ex command: :${command}`);
+    const separator = command.search(/\s/);
+    const name = separator === -1 ? command : command.slice(0, separator);
+    const args = separator === -1 ? "" : command.slice(separator + 1).trim();
+    const bareName = name.endsWith("!") ? name.slice(0, -1) : name;
+
+    if (ModalEditor.EX_RESERVED_NAMES.has(bareName)) {
+      this.notifyFn(`Reserved ex command: :${name}`);
+      return;
+    }
+
+    if (this.exCommandSettings.piDispatch && this.commandNamesFn().has(name)) {
+      this.dispatchSlashCommand(name, args);
+      return;
+    }
+
+    this.notifyFn(`Unsupported ex command: :${command}`);
+  }
+
+  /**
+   * Run `/name args` through the editor's own submit path, then put the
+   * composed prompt back. Every dispatch route clears the prompt buffer, and no
+   * command reads that buffer as an argument, so restoring the pre-dispatch
+   * snapshot is always semantically correct.
+   *
+   * The dispatch is a side effect the user never typed, so it must leave no
+   * trace: besides the text and cursor, the undo depth, the redo stack and the
+   * repeatable command all go back to what they were. Without that, the
+   * dispatch's own `setText("")` would sit on the undo stack and swallow the
+   * next `u`.
+   */
+  private dispatchSlashCommand(name: string, args: string): void {
+    const saved = this.captureSnapshot();
+    const savedRedo = [...this.redoStack];
+    const savedRepeat = this.lastRepeatableCommand;
+    const undoStack = (this as unknown as ModalEditorInternals).undoStack;
+    const savedUndoDepth = undoStack?.length ?? 0;
+
+    if (this.exCommandSettings.copyInputToClipboard && saved.text) {
+      this.clipboardMirror.mirror(saved.text);
+    }
+
+    try {
+      this.runCommandFn(args ? `/${name} ${args}` : `/${name}`);
+    } finally {
+      this.restoreSnapshot(saved);
+      while (undoStack && undoStack.length > savedUndoDepth) undoStack.pop();
+      this.redoStack.length = 0;
+      this.redoStack.push(...savedRedo);
+      this.lastRepeatableCommand = savedRepeat;
     }
   }
 
@@ -3531,6 +3656,10 @@ export default function (pi: ExtensionAPI) {
     if (clipboardMirrorPolicy.warning && ctx.hasUI) {
       ctx.ui.notify(clipboardMirrorPolicy.warning, "warning");
     }
+    const exCommand = resolveExCommandSettings(piVimSettings.exCommand);
+    if (exCommand.warning && ctx.hasUI) {
+      ctx.ui.notify(exCommand.warning, "warning");
+    }
 
     const t = ctx.ui.theme;
     const modeColors = resolveModeColors(piVimSettings.modeColors);
@@ -3556,6 +3685,16 @@ export default function (pi: ExtensionAPI) {
       editor.setQuitFn(() => ctx.shutdown());
       editor.setNotifyFn((message) => ctx.ui.notify(message, "warning"));
       editor.setModeChangeFn(modeChangeHandler);
+      editor.setExCommandSettings(exCommand.settings);
+      // Resolved at submit time so commands registered or reloaded mid-session
+      // are dispatchable without restarting.
+      editor.setCommandNamesFn(
+        () =>
+          new Set([
+            ...EX_BUILTIN_COMMAND_NAMES,
+            ...pi.getCommands().map((command) => command.name),
+          ]),
+      );
       return editor;
     });
   });

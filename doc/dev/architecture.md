@@ -79,9 +79,9 @@ changing behavior.
 
 | module | owns | pure? |
 | --- | --- | --- |
-| `index.ts` | modal state machine, key dispatch, operators, undo/redo, dot-repeat, visual selection anchor, put/register, render composition, EX mini-mode, session hooks | no (all mutable state) |
+| `index.ts` | modal state machine, key dispatch, operators, undo/redo, dot-repeat, visual selection anchor, put/register, render composition, EX mini-mode and the pi-command bridge, session hooks | no (all mutable state) |
 | `types.ts` | `Mode`, `CharMotion`, `PendingMotion`, `PendingOperator`, `LastCharMotion`, `NORMAL_KEYS` | n/a (types + constants) |
-| `settings.ts` | `PiVimSettings` shape + `readPiVimSettings` | reads settings |
+| `settings.ts` | `PiVimSettings` shape + `readPiVimSettings` + the `exCommand` resolver | reads settings |
 | `motions.ts` | char-find / word / paragraph motion targets, grapheme splitting | yes |
 | `text-objects.ts` | word / delimited / matching-pair range resolution | yes |
 | `word-boundary-cache.ts` | line-keyed cache of word-motion boundaries | stateful cache, no editor state |
@@ -208,16 +208,66 @@ normal mode. It also declines to consume anything while `pendingG` or
 `":"`. Subsequent keys append through `handlePendingExCommand` (with the
 paste/newline wait policy applied in the pre-pass, so a pasted newline is
 truncated away rather than submitting). `Esc` cancels; a **typed** `Enter` —
-the only thing that can submit — calls `submitPendingExCommand()`, which:
+the only thing that can submit — calls `submitPendingExCommand()`, which
+resolves the line in a fixed precedence order:
 
-1. strips the leading `:`, trims, and detects a trailing `!` (force);
+1. strip the leading `:`, trim, and detect a trailing `!` (force);
 2. if the name is a reserved quit name (`q`, `qa`, `quit`, `qall`,
-   `quitall`), quits — guarding a non-empty prompt unless forced;
-3. otherwise surfaces an "Unsupported ex command" notice.
+   `quitall`), quit — guarding a non-empty prompt unless forced;
+3. split the remainder into `name` and verbatim `args` on the first
+   whitespace run;
+4. if `name` is in `EX_RESERVED_NAMES` (held for future vim ex semantics),
+   surface a "Reserved ex command" notice — never dispatch;
+5. if `piDispatch` is on and `name` is a known Pi command, dispatch it;
+6. otherwise surface an "Unsupported ex command" notice.
 
-The reserved-name set and the unsupported-command fallthrough are the
-extension point for richer EX handling: new EX behavior slots in at
-`submitPendingExCommand` between the quit check and the fallthrough.
+```mermaid
+flowchart TD
+  Enter["typed Enter"] --> Quit{"quit name?"}
+  Quit -- yes --> DoQuit["quitFn (guard non-empty prompt)"]
+  Quit -- no --> Reserved{"in EX_RESERVED_NAMES?"}
+  Reserved -- yes --> Notice["notify: Reserved ex command"]
+  Reserved -- no --> Known{"piDispatch AND known Pi command?"}
+  Known -- yes --> Dispatch["dispatchSlashCommand(name, args)"]
+  Known -- no --> Unsupported["notify: Unsupported ex command"]
+```
+
+### the pi-command bridge
+
+Pi exposes no public command-dispatch API, so `dispatchSlashCommand` reuses
+the one mechanism that reaches every command kind: the editor's own submit
+path. `:name args` becomes `/name args` in the buffer, then `onSubmit` runs —
+byte-for-byte what happens when the user types the slash command themselves.
+Two seams keep that coupling injectable and testable without a live runtime:
+
+| seam | default | supplied at `session_start` |
+| --- | --- | --- |
+| `setRunCommandFn` | `setText(line)` then `onSubmit(line)` | not overridden (the editor owns its submit) |
+| `setCommandNamesFn` | the mirrored builtin names | union of builtins and `pi.getCommands()` |
+| `setExCommandSettings` | dispatch on, clipboard copy off | `resolveExCommandSettings` |
+
+`getCommands()` is called inside the thunk, so the known-command set is
+recomputed on every submit and a command registered mid-session is reachable.
+Pi's builtin list is not re-exported from the package entry point, so
+`EX_BUILTIN_COMMAND_NAMES` mirrors it; a name missing from that mirror simply
+falls through to "unsupported".
+
+Every dispatch route clears the prompt buffer, and no command reads that buffer
+as an argument. So `dispatchSlashCommand` brackets the call with the same
+`captureSnapshot` / `restoreSnapshot` pair the dot-repeat rollback uses,
+restoring text *and* cursor in a `finally`. Both of Pi's routes clear
+synchronously before their first `await`, so the restore wins; a route that
+cleared after an `await` would defeat it, which is what the opt-in
+`copyInputToClipboard` setting exists to cover.
+
+Restoring the text is not enough on its own. The dispatch's own `setText("")`
+is a buffer mutation the user never typed, and it leaves three traces: an entry
+on the host editor's undo stack, a cleared redo stack, and a cleared repeatable
+command (both via the `setText` override). Left alone, the first `u` after any
+`:command` would be silently swallowed undoing the dispatch's churn. So the
+`finally` also pops the undo stack back to its pre-dispatch depth and restores
+`redoStack` and `lastRepeatableCommand`. The invariant worth remembering: a
+dispatch is transparent to the buffer, the cursor, undo, redo, and `.`.
 
 ## where the larger behaviors live in `index.ts`
 

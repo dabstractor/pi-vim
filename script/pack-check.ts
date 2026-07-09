@@ -106,9 +106,22 @@ const THRESHOLDS = {
   // the package `files` list, so its ~5 KB of new prose dominates the
   // unpacked growth. Budgets bumped to 42800 / 180000 / 17, leaving ~470 B
   // packed and ~829 B unpacked headroom.
+  //
+  // EX pi-command bridge: index.ts gains the mirrored builtin command names,
+  // the reserved-name set, the name/args split in submitPendingExCommand, and
+  // dispatchSlashCommand plus its three injected seams; settings.ts gains the
+  // exCommand reader and resolver; README gains the pi-command bridge section
+  // and a rewritten comparison row. Measured after the README edits (they ship
+  // in the package `files` list): packed 42576 -> 45627 (+3051 B), unpacked
+  // 179906 -> 189116 (+9210 B), files unchanged at 17 (no new module — the
+  // bridge lands in index.ts + settings.ts precisely to avoid a maxFiles bump).
+  // Roughly a third of the packed delta is the 21-name builtin mirror, which a
+  // future upstream re-export of BUILTIN_SLASH_COMMANDS would remove. Budgets
+  // bumped to 46100 / 189900, leaving ~473 B packed and ~784 B unpacked
+  // headroom. maxFiles stays at the cap: the next new module must bump it.
   maxFiles: 17,
-  maxSize: 42800,
-  maxUnpackedSize: 180000,
+  maxSize: 46100,
+  maxUnpackedSize: 189900,
 } as const;
 
 function compareStrings(a: string, b: string): number {

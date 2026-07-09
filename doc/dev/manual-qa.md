@@ -563,6 +563,130 @@ repeat memory, so whatever the seed recorded is irrelevant.
 
 ---
 
+## group H — ex pi-command bridge (priority)
+
+The whole group is manual-only in the sense that matters. Unit tests drive a
+`runCommand` spy; only a real session proves that a real command runs, that
+the overlay it opens behaves, and — the load-bearing question — that the
+composed prompt survives the dispatch. No nvim parity test applies: this is a
+Pi-integration surface, not a vim motion.
+
+Run these in a session launched **without** `--no-extensions` if you want to
+exercise an installed extension or skill command; the plain launch command at
+the top of this file is enough for the builtin cases.
+
+### H1 — `:name` runs the Pi command
+
+- seed: fresh session, empty prompt.
+- keys: `<Esc>`, then `:` `h` `o` `t` `k` `e` `y` `s` `<Enter>`.
+- expect: the hotkeys overlay opens, exactly as if you had typed `/hotkeys`
+  and pressed `<Enter>`. Dismiss it.
+- reset: `<Esc> gg dG`
+
+### H2 — `:name args` passes the arguments through
+
+- seed: fresh session, empty prompt.
+- keys: `<Esc>`, then `:` `m` `o` `d` `e` `l` `<Space>` and a few characters of
+  a model name your session can resolve, then `<Enter>`.
+- expect: the model selector opens filtered/applied as if you had typed
+  `/model <same args>`. Escape the selector.
+- reset: `<Esc> gg dG`
+
+### H3 — the composed prompt survives a dispatch (the mitigation question)
+
+This is the case the whole design turns on. Record the result for **each**
+command in the table below; that table is the answer to "is
+`copyInputToClipboard` necessary?".
+
+- seed: `i`, type a distinctive multi-line prompt (use `<Esc>` `o` to add
+  lines — `<Enter>` submits), then `<Esc>` and move the cursor somewhere in
+  the middle of the first line.
+- keys: `:` `<command>` `<Enter>`. Dismiss whatever opens.
+- expect: the prompt text is unchanged and the cursor is exactly where you
+  left it.
+- run once per command and fill in:
+
+| command | kind | prompt survived? | cursor survived? |
+|---|---|---|---|
+| `:session` | builtin, no overlay | | |
+| `:hotkeys` | builtin, overlay | | |
+| `:model` (then Escape) | builtin, overlay | | |
+| `:compact` | builtin, async | | |
+| an installed extension or skill command | async route | | |
+
+- if any row loses the prompt: re-run that command with
+  `"piVim": { "exCommand": { "copyInputToClipboard": true } }` in settings and
+  confirm the prompt text is on the system clipboard afterwards. That decides
+  whether the clipboard net should ship on by default for async routes.
+- reset: `<Esc> gg dG`
+
+### H4 — a dispatch leaves no trace in undo, redo, or `.`
+
+The dispatch mutates the buffer internally. That churn must be invisible.
+
+- seed: `i` type `"hello world"` `<Esc>` `gg 0`
+- keys: `x` (buffer `ello world`), then `:` `s` `e` `s` `s` `i` `o` `n` `<Enter>`,
+  then `u`.
+- expect: `u` restores `hello world`. If it appears to do nothing and a second
+  `u` is needed, the dispatch is leaking an undo entry.
+- keys: on a fresh seed, `x`, then `:session` `<Enter>`, then `.`
+- expect: `.` deletes another character (`llo world`) — the repeat survived.
+- keys: on a fresh seed, `x`, `u`, then `:session` `<Enter>`, then `<Ctrl+r>`
+- expect: redo re-applies the delete (`ello world`).
+- reset: `<Esc> gg dG`
+
+### H5 — a reserved name is never dispatched
+
+- seed: fresh session. Empty prompt.
+- keys: `<Esc>`, then `:` `s` `<Enter>`. Repeat with `:w`, `:g`, `:d`, `:w!`.
+- expect: each shows a `Reserved ex command: :…` warning. Nothing runs, no
+  message is sent to the agent, the prompt is untouched.
+- notes: if you have an extension command named `w` or `s` installed, this is
+  the case that proves reserved wins over it. `/w` still works from the
+  prompt.
+- reset: none needed.
+
+### H6 — an unknown name warns and sends nothing
+
+- seed: fresh session. Empty prompt.
+- keys: `<Esc>`, then `:` `t` `r` `e` `e` `!` `<Enter>`, then
+  `:` `u` `n` `k` `n` `o` `w` `n` `x` `y` `z` `<Enter>`.
+- expect: both show `Unsupported ex command: :…`. Crucially, **no turn starts**
+  and nothing reaches the LLM — a typo must never become a message. `:tree!`
+  is unsupported because a trailing `!` is only meaningful for the quit family.
+- reset: none needed.
+
+### H7 — a pasted command name never auto-dispatches
+
+The dangerous version of A8, now that the ex line can run real commands.
+
+- seed: fresh session. Copy the two lines `compact` and `rest` (with the
+  newline between them) to the system clipboard.
+- keys: `<Esc>`, then `:`, then paste with the terminal's paste shortcut.
+- expect: **nothing runs.** The footer reads ` EX :compact_ ` and waits. Only
+  then does a typed `<Enter>` dispatch it.
+- reset: `<Esc> gg dG`
+
+### H8 — the kill switch restores a quit-only ex line
+
+- seed: put `"piVim": { "exCommand": { "piDispatch": false } }` in project
+  `.pi/settings.json`, then launch a fresh session.
+- keys: `<Esc>`, then `:` `t` `r` `e` `e` `<Enter>`, then `:` `q` `<Enter>`.
+- expect: `:tree` shows `Unsupported ex command: :tree` and runs nothing;
+  `:q` still quits. Remove the setting afterwards.
+- reset: the session has exited; delete the project setting.
+
+### H9 — an invalid setting warns once and falls back
+
+- seed: put `"piVim": { "exCommand": { "piDispatch": "yes" } }` in settings,
+  then launch a fresh session.
+- expect: exactly one startup warning,
+  `Invalid piVim.exCommand piDispatch; expected a boolean.`, and `:hotkeys`
+  still dispatches (the default is on). Remove the setting afterwards.
+- reset: `<Esc> gg dG`; delete the setting.
+
+---
+
 ## coverage map
 
 | area | automated | manual only |
@@ -581,7 +705,14 @@ repeat memory, so whatever the seed recorded is irrelevant.
 | submit is not repeatable | `test/dot-repeat-review.test.ts` | A6 |
 | host text injection cancels | `test/dot-repeat-review.test.ts` (simulated) | A7 |
 | pasted newline never submits an ex command | `test/modal-editor.test.ts` (simulated markers) | A8 |
+| ex name resolution (quit / reserved / known / unknown) | `test/modal-editor.test.ts` | H5, H6 |
+| ex dispatch reaches a real Pi command | `test/modal-editor.test.ts` (spy only) | H1, H2 |
+| prompt survives a dispatch | `test/modal-editor.test.ts` (synchronous routes) | **H3** |
+| dispatch is transparent to undo / redo / `.` | `test/modal-editor.test.ts` | H4 |
+| pasted command name never auto-dispatches | `test/modal-editor.test.ts` (simulated markers) | H7 |
+| `exCommand` settings resolver | `test/settings.test.ts` | H8, H9 |
 
-Group A is the priority. Everything below it has a green automated
+Groups A and H are the priority. Everything else has a green automated
 counterpart and is here to catch a difference between the harness and a real
-terminal.
+terminal. H3 is the one case whose result should be written back into
+`doc/dev/architecture.md` if it contradicts what is claimed there.

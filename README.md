@@ -20,6 +20,10 @@ Default-equivalent `settings.json`:
 {
   "piVim": {
     "clipboardMirror": "all",
+    "exCommand": {
+      "piDispatch": true,
+      "copyInputToClipboard": false
+    },
     "modeColors": {
       "insert": "borderMuted",
       "normal": "borderAccent",
@@ -33,6 +37,8 @@ Default-equivalent `settings.json`:
 All keys are optional; omitting `piVim` is equivalent. Project overrides global for non-executing settings; project `modeColors` replaces global `modeColors` whole, with missing modes defaulting above. `modeChange` is intentionally absent from the default and is read only from the global settings file because it executes shell commands.
 
 `clipboardMirror`: `all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`.
+
+`exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [ex mini-mode](#ex-mini-mode)); `false` restores a quit-only ex line. `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. Both are read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
 
 `syncBorderColorWithMode`: `false` keeps Pi thinking border; `true` follows mode colors.
 
@@ -155,7 +161,7 @@ Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybinding
 
 #### ex mini-mode
 
-Quit-only ex flows.
+Quit flows, plus a bridge that runs Pi slash commands from the ex line.
 
 | key / command | action |
 |---------------|--------|
@@ -169,9 +175,29 @@ Quit-only ex flows.
 | `:qa!` | Same force quit policy as `:q!` |
 | `:quit` / `:qall` / `:quitall` | Long aliases with the same safe quit policy as `:q` |
 | `:quit!` / `:qall!` / `:quitall!` | Long aliases with the same force quit policy as `:q!` |
-| unsupported `:{cmd}` | Show warning notification; no quit |
+| `:{command}` | Run the Pi slash command of that name, e.g. `:tree` runs `/tree` |
+| `:{command} {args}` | Run it with everything after the first whitespace run, e.g. `:model opus` runs `/model opus` |
+| reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
+| unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
 
 Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. Only a typed `Enter` submits an ex command: pasting into the ex line keeps the text up to the first newline and discards the rest of the paste, so pasted content can never execute (see `doc/dev/ex-paste-newline-policy.md`).
+
+##### pi-command bridge
+
+This is a bridge to Pi's command registry, not vim ex-command support. `:name` is exactly the user typing `/name` and pressing `Enter`: it dispatches builtin, extension, skill, and prompt commands alike, and it grants no capability the `/` palette does not already have. Vim ex-command *semantics* (`:s`, `:g`, `:w`, `:r`, …) remain out of scope.
+
+An ex line resolves in a fixed order:
+
+1. **quit names win** — the `:q` family above, unchanged.
+2. **reserved names win next** — `s`, `g`, `v`, `d`, `m`, `t`, `co`, `j`, `w`, `r`, `normal`, `sort`, `&`, `>`, `<` are held for future vim ex semantics. They are never dispatched, even if a Pi command of the same name is installed; use `/w` for that. A trailing `!` is stripped for this check, so `:w!` is reserved too.
+3. **known Pi commands dispatch** — the union of Pi's builtins and whatever `pi.getCommands()` reports at the moment you press `Enter`, so a command registered mid-session is reachable without a restart.
+4. **anything else is unsupported** — a warning notification. A typo never reaches the LLM as a message.
+
+Names match exactly and case-sensitively: `:tree` works, `:tre` and `:tree!` do not.
+
+Dispatch clears Pi's prompt buffer, so pi-vim snapshots the composed prompt before the command runs and restores it after; no command reads that buffer as an argument, so the restore is always safe. A dispatch is transparent: the prompt text, the cursor position, undo, redo, and the `.` repeat all survive it untouched. Pi's builtin and extension routes both clear the buffer synchronously before their first `await`, which the restore beats. Set `piVim.exCommand.copyInputToClipboard` to `true` if you want the prompt copied to the OS clipboard before each dispatch as a belt-and-braces fallback, or `piVim.exCommand.piDispatch` to `false` to switch the bridge off entirely.
+
+Discoverability is Pi's `/` palette; ex-line completion of command names is not implemented.
 
 Insert-mode shortcuts (stay in Insert mode):
 
@@ -404,7 +430,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Registers / macros / search | Not implemented | Supported |
-| Ex commands | Quit-only EX mini-mode (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms) | Full ex command-line surface |
+| Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms) and dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`); vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---
@@ -424,7 +450,8 @@ Explicitly deferred:
 - Quote matching via `%`, parser-aware delimiter matching, matchit-style matching, and mixed-delimiter structural validation
 - Delimited-object counts (`d2i"`, `2ci(`, `y2a{`)
 - Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
-- Ex surface beyond quit (`:s`, `:g`, `:w`, `:r`, …)
+- Vim ex-command semantics (`:s`, `:g`, `:w`, `:r`, …) — those names are reserved, not implemented; the ex line only bridges to Pi slash commands
+- Ex-line completion of Pi command names, and `::name` force-dispatch of a reserved name
 - Search (`/`, `?`, `n`, `N`)
 - Replace mode (`R`) — only `r{char}` is supported
 - Count prefix beyond currently supported motions, including `{count}%` percent-of-file jumps

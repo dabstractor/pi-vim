@@ -11,16 +11,28 @@ export type ModeChangeSettings = {
   normal?: string;
 };
 
+export type ExCommandSettings = {
+  piDispatch: boolean;
+  copyInputToClipboard: boolean;
+};
+
 export type PiVimSettings = {
   clipboardMirror?: unknown;
+  exCommand?: unknown;
   modeColors?: ModeColorSettings;
   modeChange?: ModeChangeSettings;
   syncBorderColorWithMode?: boolean;
 };
 
+export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
+  piDispatch: true,
+  copyInputToClipboard: false,
+};
+
 const M = Symbol(),
   C = ["insert", "normal", "ex"] as const,
   MC = ["insert", "normal"] as const,
+  EX = ["piDispatch", "copyInputToClipboard"] as const,
   T = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const rec = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -62,6 +74,43 @@ export function readPiVimClipboardMirrorSetting(g: unknown, p: unknown) {
   return v === M ? undefined : v;
 }
 
+export function readPiVimExCommandSetting(g: unknown, p: unknown) {
+  // The bridge only selects among commands Pi already trusts; it grants no new
+  // capability, so a project file may turn it off (unlike modeChange).
+  let v = get(p, "exCommand");
+  if (v !== M) return v;
+  v = get(g, "exCommand");
+  return v === M ? undefined : v;
+}
+
+export function resolveExCommandSettings(value: unknown): {
+  settings: ExCommandSettings;
+  warning?: string;
+} {
+  const settings = { ...DEFAULT_EX_COMMAND_SETTINGS };
+  if (value === undefined) return { settings };
+  if (!rec(value)) {
+    return {
+      settings,
+      warning: "Invalid piVim.exCommand; expected an object.",
+    };
+  }
+
+  const invalid: string[] = [];
+  for (const k of EX) {
+    if (!Object.hasOwn(value, k)) continue;
+    const v = value[k];
+    if (typeof v === "boolean") settings[k] = v;
+    else invalid.push(k);
+  }
+
+  if (!invalid[0]) return { settings };
+  return {
+    settings,
+    warning: `Invalid piVim.exCommand ${invalid.join(", ")}; expected a boolean.`,
+  };
+}
+
 export function readPiVimModeColors(g: unknown, p: unknown) {
   const v = get(p, "modeColors");
   // Project settings are a whole-setting override. If a project checks in an
@@ -99,6 +148,7 @@ function disk(cwd: string): PiVimSettings {
     p = s.getProjectSettings();
   return {
     clipboardMirror: readPiVimClipboardMirrorSetting(g, p),
+    exCommand: readPiVimExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     modeChange: readPiVimModeChange(g, p),
     syncBorderColorWithMode: readPiVimBooleanSetting(
