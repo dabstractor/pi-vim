@@ -3193,6 +3193,7 @@ export class ModalEditor extends CustomEditor {
 
     if (text.endsWith("\n")) {
       const content = text.slice(0, -1);
+      const targetLine = this.getCursor().line + 1;
       for (let i = 0; i < safeCount; i++) {
         super.handleInput(CTRL_E);
         super.handleInput(NEWLINE);
@@ -3200,17 +3201,24 @@ export class ModalEditor extends CustomEditor {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
+      // Vim: line-wise `p` leaves the cursor on the first non-blank of the
+      // first inserted line (one line below the cursor).
+      this.moveCursorToLineStart(targetLine);
+      this.moveCursorToFirstNonWhitespace();
       return;
     }
 
     if (!this.isCursorAtOrPastEol()) {
       super.handleInput(ESC_RIGHT);
     }
+    const insertStartAbs = this.getAbsoluteIndexFromCursor();
+    const totalLen = text.length * safeCount;
     for (let i = 0; i < safeCount; i++) {
       for (const char of text) {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
     }
+    this.placeCharwisePutCursor(insertStartAbs, totalLen, text);
   }
 
   private putBefore(): void {
@@ -3224,6 +3232,7 @@ export class ModalEditor extends CustomEditor {
 
     if (text.endsWith("\n")) {
       const content = text.slice(0, -1);
+      const targetLine = this.getCursor().line;
       for (let i = 0; i < safeCount; i++) {
         super.handleInput(CTRL_A);
         super.handleInput(NEWLINE);
@@ -3232,14 +3241,43 @@ export class ModalEditor extends CustomEditor {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
+      // Vim: line-wise `P` leaves the cursor on the first non-blank of the
+      // first inserted line (the cursor's original line, since `P` inserts above).
+      this.moveCursorToLineStart(targetLine);
+      this.moveCursorToFirstNonWhitespace();
       return;
     }
 
+    const insertStartAbs = this.getAbsoluteIndexFromCursor();
+    const totalLen = text.length * safeCount;
     for (let i = 0; i < safeCount; i++) {
       for (const char of text) {
         super.handleInput(char === "\n" ? NEWLINE : char);
       }
     }
+    this.placeCharwisePutCursor(insertStartAbs, totalLen, text);
+  }
+
+  // Vim char-wise put cursor placement: single-line register → last inserted
+  // grapheme; multi-line register → first inserted grapheme. `insertStartAbs` is
+  // where typing began and `totalLen` is `text.length * safeCount`, so this is
+  // count-correct and grapheme-safe for astral characters.
+  private placeCharwisePutCursor(
+    insertStartAbs: number,
+    totalLen: number,
+    text: string,
+  ): void {
+    if (text.includes("\n")) {
+      this.moveCursorToAbsoluteIndex(insertStartAbs);
+      return;
+    }
+
+    const graphemes = getLineGraphemes(text);
+    const lastGrapheme = graphemes[graphemes.length - 1];
+    const lastGraphemeLen = lastGrapheme
+      ? lastGrapheme.end - lastGrapheme.start
+      : 1;
+    this.moveCursorToAbsoluteIndex(insertStartAbs + totalLen - lastGraphemeLen);
   }
 
   private deleteRange(

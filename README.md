@@ -324,6 +324,8 @@ implemented and cancel the pending operator. Linewise counted yank (`{count}yy`,
 
 Put reads the OS clipboard first unless the last local register write was not mirrored. Paste text ending in `\n` is line-wise.
 
+Cursor placement after a put matches Vim: line-wise puts land on the **first non-blank** of the **first** pasted line; a single-line char-wise register lands on its **last** inserted character; a multi-line char-wise register lands on its **first** inserted character.
+
 ---
 
 ### undo / redo
@@ -358,6 +360,7 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
+| line-wise `p`/`P` first line all whitespace | Lands at col 0 | Lands on the last char of the line (shares the `^`/`I` all-whitespace divergence) |
 | Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
 | Visual mode | Not implemented | `v`, `V`, `<C-v>` |
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |

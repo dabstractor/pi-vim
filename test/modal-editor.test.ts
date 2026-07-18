@@ -5538,7 +5538,8 @@ describe("put — character-wise", () => {
     assert.equal(editor.getText(), "aSYSb");
     assert.equal(editor.getRegister(), "shadow");
     assert.equal(editor.getMode(), "normal");
-    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+    // char-wise put lands on the last inserted char (the trailing "S")
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
   });
 
   it("P reads OS clipboard text instead of stale internal register", () => {
@@ -5551,7 +5552,8 @@ describe("put — character-wise", () => {
     assert.equal(editor.getText(), "SYSab");
     assert.equal(editor.getRegister(), "shadow");
     assert.equal(editor.getMode(), "normal");
-    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+    // char-wise put lands on the last inserted char (the trailing "S")
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
   });
 
   it("p falls back to internal register when OS clipboard read returns null", () => {
@@ -5753,6 +5755,116 @@ describe("put — line-wise", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Put cursor placement — Vim parity (p / P leave the cursor on the put text)
+// ---------------------------------------------------------------------------
+
+describe("put cursor placement — Vim parity", () => {
+  it("yyp leaves the cursor on the first non-blank of the new line", () => {
+    const { editor } = createEditorWithSpy("example");
+    sendKeys(editor, ["y", "y", "p"]);
+    assert.equal(editor.getText(), "example\nexample");
+    assert.equal(editor.getRegister(), "example\n");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("yy then P leaves the cursor on the first non-blank of the inserted line", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    sendKeys(editor, ["j", "y", "y", "P"]);
+    assert.equal(editor.getText(), "a\nb\nb");
+    assert.equal(editor.getRegister(), "b\n");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("p of a line-wise register lands on the first pasted line, not the last", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc");
+    editor.setRegister("X\nY\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\nX\nY\nb\nc");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("{count}p line-wise keeps the cursor on the first pasted line", () => {
+    const { editor } = createEditorWithSpy("x");
+    editor.setRegister("L\n");
+    sendKeys(editor, ["3", "p"]);
+    assert.equal(editor.getText(), "x\nL\nL\nL");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("p line-wise lands on the first non-blank column", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("    ind\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\n    ind\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 4 });
+  });
+
+  it("P line-wise with a multi-line register lands on the first pasted line", () => {
+    const { editor } = createMultiLineEditor("a\nb\nc");
+    setInternalCursor(editor, 0, 2);
+    editor.setRegister("X\nY\n");
+    sendKeys(editor, ["P"]);
+    assert.equal(editor.getText(), "a\nb\nX\nY\nc");
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
+  });
+
+  it("char-wise p lands on the last inserted grapheme", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("XyZ");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "aXyZb");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
+  it("char-wise P lands on the last inserted grapheme", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("XyZ");
+    sendKeys(editor, ["P"]);
+    assert.equal(editor.getText(), "XyZab");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("char-wise p of a multi-line register lands on the first inserted char", () => {
+    const { editor } = createMultiLineEditor("ab\ncd");
+    setInternalCursor(editor, 1, 0);
+    editor.setRegister("X\nY");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "abX\nY\ncd");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("{count}p char-wise lands on the last inserted char of the run", () => {
+    const { editor } = createEditorWithSpy("X");
+    editor.setRegister("ab");
+    sendKeys(editor, ["3", "p"]);
+    assert.equal(editor.getText(), "Xababab");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 6 });
+  });
+
+  it("char-wise p is grapheme-safe for an astral register", () => {
+    const { editor } = createEditorWithSpy("ab");
+    editor.setRegister("😀");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a😀b");
+    // cursor on the grapheme start (col 1), not mid-surrogate (col 2)
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("line-wise put of an all-whitespace first line lands at col 0 (matches ^ divergence)", () => {
+    // Vim lands on the last char of an all-whitespace line; this extension's
+    // shared findFirstNonWhitespaceColumn (used by ^/I/_) returns 0, so put
+    // agrees with ^. Documented divergence in README.
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("   \nX\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\n   \nX\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Undo / redo — u / ctrl+r  (Task 6)
 // ---------------------------------------------------------------------------
 
@@ -5814,7 +5926,8 @@ describe("undo / redo — u / ctrl+r", () => {
     sendKeys(editor, ["p"]);
     const afterPutCursor = editor.getCursor();
     assert.equal(editor.getText(), "Xab");
-    assert.deepEqual(afterPutCursor, { line: 0, col: 3 });
+    // char-wise put lands on the last inserted char (the "b")
+    assert.deepEqual(afterPutCursor, { line: 0, col: 2 });
 
     sendKeys(editor, ["u"]);
     assert.equal(editor.getText(), "X");
@@ -5941,7 +6054,8 @@ describe("undo / redo — u / ctrl+r", () => {
       initial: "ab",
       keys: ["p"],
       expectedText: "aXb",
-      expectedCursor: { line: 0, col: 2 },
+      // char-wise `p` lands on the last inserted char (the "X")
+      expectedCursor: { line: 0, col: 1 },
       expectedRegister: "X",
       before: (editor) => editor.setRegister("X"),
     });
@@ -5952,7 +6066,8 @@ describe("undo / redo — u / ctrl+r", () => {
       initial: "ab",
       keys: ["P"],
       expectedText: "Xab",
-      expectedCursor: { line: 0, col: 1 },
+      // char-wise `P` lands on the last inserted char (the "X")
+      expectedCursor: { line: 0, col: 0 },
       expectedRegister: "X",
       before: (editor) => editor.setRegister("X"),
     });
