@@ -89,6 +89,23 @@ function getRawEditor(editor: ModalEditor): ModalEditorTestInternals {
   return editor as unknown as ModalEditorTestInternals;
 }
 
+/**
+ * Reset undo/redo history to a clean slate after fixture setup.
+ *
+ * The shared fixtures (`createEditorWithSpy` / `createMultiLineEditor`)
+ * populate the buffer by typing in INSERT mode, which leaves fish-style
+ * word-coalesced snapshots behind. For tests that assert undo behavior from
+ * a known state (e.g. "second `u` is a no-op"), clear that setup history so
+ * the seeded content behaves like a loaded buffer rather than typed text.
+ */
+function resetUndoHistory(editor: ModalEditor): void {
+  const raw = editor as unknown as {
+    undoStack?: { clear?: () => void; stack: unknown[] };
+  };
+  raw.undoStack?.clear?.();
+  if (raw.undoStack?.stack) raw.undoStack.stack.length = 0;
+}
+
 const INSERT_CURSOR_SHAPE = "\x1b[5 q";
 const BLOCK_CURSOR_SHAPE = "\x1b[1 q";
 const RESET_CURSOR_SHAPE = "\x1b[0 q";
@@ -6633,6 +6650,281 @@ describe("undo / redo — u / ctrl+r", () => {
       assert.equal(editor.getText(), "abcd");
       sendKeys(editor, ["2", "\x1b[114;5u"]); // 2<kitty-C-r>
       assert.equal(editor.getText(), "cd");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Insert-session undo scope — an entire insert session (enter insert → <Esc>)
+  // and a whole change command (cw/cc/s/o…) collapse to a single undo unit.
+  // -------------------------------------------------------------------------
+  describe("insert-session undo scope", () => {
+    it("initial insert session (editor starts in INSERT) undoes as one unit", () => {
+      // Real-world primary case: the editor boots in INSERT mode, so the user
+      // types a message directly (no `i`) and expects a single `u` to revert
+      // the whole typed sentence rather than one word at a time.
+      const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+      editor.setClipboardFn(() => undefined);
+      editor.setClipboardReadFn(() => null);
+      assert.equal(editor.getMode(), "insert");
+      for (const ch of "hello world foo") editor.handleInput(ch);
+      editor.handleInput("\x1b");
+      assert.equal(editor.getText(), "hello world foo");
+
+      editor.handleInput("u");
+      assert.equal(editor.getText(), "", "first u reverts the whole session");
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+      editor.handleInput("u");
+      assert.equal(editor.getText(), "", "second u is a no-op");
+      editor.handleInput("\x12"); // <C-r> restores the whole session
+      assert.equal(editor.getText(), "hello world foo");
+    });
+
+    it("pure insert: i hello world foo<Esc> then u reverts in one press", () => {
+      const { editor } = createEditorWithSpy("");
+      sendKeys(editor, [
+        "i",
+        "h",
+        "e",
+        "l",
+        "l",
+        "o",
+        " ",
+        "w",
+        "o",
+        "r",
+        "l",
+        "d",
+        " ",
+        "f",
+        "o",
+        "o",
+        "\x1b",
+      ]);
+      assert.equal(editor.getText(), "hello world foo");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "", "first u reverts whole session");
+      assert.deepEqual(
+        editor.getCursor(),
+        { line: 0, col: 0 },
+        "cursor lands at change start",
+      );
+
+      // second u is a no-op (history exhausted, clamp)
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "", "second u is a no-op");
+    });
+
+    it("pure insert + redo: u then <C-r> restores the whole session", () => {
+      const { editor } = createEditorWithSpy("");
+      sendKeys(editor, [
+        "i",
+        "h",
+        "e",
+        "l",
+        "l",
+        "o",
+        " ",
+        "w",
+        "o",
+        "r",
+        "l",
+        "d",
+        "\x1b",
+      ]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "");
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "hello world");
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 10 });
+    });
+
+    it("change-with-insert: cw bar baz<Esc> then u reverts delete+insert in one press", () => {
+      const { editor } = createEditorWithSpy("foo");
+      resetUndoHistory(editor);
+      sendKeys(editor, ["c", "w", "b", "a", "r", " ", "b", "a", "z", "\x1b"]);
+      assert.equal(editor.getText(), "bar baz");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(
+        editor.getText(),
+        "foo",
+        "u reverts word-delete and typed text",
+      );
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "foo", "second u is a no-op");
+    });
+
+    it("o session: o typed<Esc> then u removes the opened line in one press", () => {
+      const { editor } = createMultiLineEditor("x");
+      resetUndoHistory(editor);
+      sendKeys(editor, ["o", "t", "y", "p", "e", "d", "\x1b"]);
+      assert.equal(editor.getText(), "x\ntyped");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "x", "u removes opened line and its text");
+      // cursor returns to the line where `o` was invoked
+      assert.equal(editor.getCursor().line, 0);
+    });
+
+    it("O session: O typed<Esc> then u removes the opened line in one press", () => {
+      const { editor } = createMultiLineEditor("x");
+      resetUndoHistory(editor);
+      sendKeys(editor, ["O", "t", "y", "p", "e", "d", "\x1b"]);
+      assert.equal(editor.getText(), "typed\nx");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "x", "u removes opened line and its text");
+    });
+
+    it("no-op i<Esc> preserves history: a following u reverts a prior real change", () => {
+      const { editor } = createEditorWithSpy("");
+      sendKeys(editor, ["i", "X", "\x1b"]); // one real change
+      // a no-op insert session must not consume a history slot
+      sendKeys(editor, ["i", "\x1b"]);
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "", "no-op insert did not add a change");
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "X");
+    });
+
+    it("redo clears on real edit: after u, a new insert clears the redo path", () => {
+      const { editor } = createEditorWithSpy("");
+      sendKeys(editor, ["i", "a", "b", "c", "\x1b", "u"]); // undo → redo path holds "abc"
+      assert.equal(editor.getText(), "");
+      sendKeys(editor, ["i", "Z", "\x1b"]); // new edit clears redo
+      sendKeys(editor, ["\x12"]);
+      assert.equal(
+        editor.getText(),
+        "Z",
+        "<C-r> no longer restores the cleared redo path",
+      );
+    });
+
+    it("exhausted-history clamp: u at empty history is a no-op", () => {
+      const { editor } = createEditorWithSpy("");
+      const before = editor.getText();
+      const beforeCursor = editor.getCursor();
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), before);
+      assert.deepEqual(editor.getCursor(), beforeCursor);
+    });
+
+    it("count insert entry is one undo unit (count-repeat is a documented gap)", () => {
+      // Count prefix for insert entries is intentionally unsupported on this
+      // branch (see README "Not implemented": count prefix beyond supported
+      // motions; no dot-repeat). `3i` therefore inserts once; the invariant
+      // under test is that the single insert session is ONE undo unit and the
+      // count does not leak into the following command.
+      const { editor } = createEditorWithSpy("abc");
+      sendKeys(editor, ["3", "i", "Z", "\x1b"]); // inserts one "Z"
+      assert.equal(editor.getText(), "Zabc");
+
+      sendKeys(editor, ["u"]); // must revert only this one insert, not leak count
+      assert.equal(editor.getText(), "abc");
+    });
+
+    it("no count leak: <count>u consumes only its count", () => {
+      const { editor } = createEditorWithSpy("");
+      // build three separate insert sessions
+      sendKeys(editor, ["i", "a", "\x1b"]);
+      sendKeys(editor, ["a", "b", "\x1b"]);
+      sendKeys(editor, ["a", "c", "\x1b"]);
+      assert.equal(editor.getText(), "abc");
+
+      sendKeys(editor, ["2", "u"]); // undo exactly two changes
+      assert.equal(editor.getText(), "a");
+      // count must not leak: another `u` undoes exactly one more
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "");
+    });
+
+    it("no regression: dd / x / dw / p / r still undo as one unit each", () => {
+      // Each atomic normal-mode edit remains a single undo unit. Use a fresh
+      // editor per command so cursor/register coupling between commands does
+      // not muddy the assertions.
+      const dd = createMultiLineEditor("foo\nbar");
+      resetUndoHistory(dd.editor);
+      sendKeys(dd.editor, ["d", "d"]);
+      assert.equal(dd.editor.getText(), "bar");
+      sendKeys(dd.editor, ["u"]);
+      assert.equal(dd.editor.getText(), "foo\nbar", "dd undoes as one unit");
+
+      const x = createEditorWithSpy("foo");
+      resetUndoHistory(x.editor);
+      sendKeys(x.editor, ["x"]);
+      assert.equal(x.editor.getText(), "oo");
+      sendKeys(x.editor, ["u"]);
+      assert.equal(x.editor.getText(), "foo", "x undoes as one unit");
+
+      const dw = createEditorWithSpy("foo bar");
+      resetUndoHistory(dw.editor);
+      sendKeys(dw.editor, ["d", "w"]);
+      assert.equal(dw.editor.getText(), "bar");
+      sendKeys(dw.editor, ["u"]);
+      assert.equal(dw.editor.getText(), "foo bar", "dw undoes as one unit");
+
+      const p = createEditorWithSpy("ab");
+      resetUndoHistory(p.editor);
+      p.editor.setRegister("Z");
+      sendKeys(p.editor, ["p"]);
+      assert.equal(p.editor.getText(), "aZb");
+      sendKeys(p.editor, ["u"]);
+      assert.equal(p.editor.getText(), "ab", "p undoes as one unit");
+
+      const r = createEditorWithSpy("foo");
+      resetUndoHistory(r.editor);
+      sendKeys(r.editor, ["r", "Q"]);
+      assert.equal(r.editor.getText(), "Qoo");
+      sendKeys(r.editor, ["u"]);
+      assert.equal(r.editor.getText(), "foo", "r undoes as one unit");
+    });
+
+    it("grapheme-safe: insert with a surrogate-pair emoji reverts whole session", () => {
+      const { editor } = createEditorWithSpy("");
+      const graphemes = [..."😀 hello world"];
+      sendKeys(editor, ["i", ...graphemes, "\x1b"]);
+      assert.equal(editor.getText(), "😀 hello world");
+
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "", "u reverts the whole session");
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+    });
+
+    it("cursor placement: after u cursor sits at the change start", () => {
+      // cw on the second word: the change starts at that word, and undo must
+      // land the cursor on the first column of the undone region.
+      const { editor } = createEditorWithSpy("foo bar");
+      resetUndoHistory(editor);
+      // move to start of "bar" (col 4)
+      sendKeys(editor, ["w"]);
+      assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+      sendKeys(editor, ["c", "w", "X", "Y", "\x1b"]);
+      assert.equal(editor.getText(), "foo XY");
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "foo bar");
+      assert.deepEqual(
+        editor.getCursor(),
+        { line: 0, col: 4 },
+        "cursor at change start after undo",
+      );
+    });
+
+    it("change-with-insert + redo: u then <C-r> restores delete+insert", () => {
+      const { editor } = createEditorWithSpy("foo bar");
+      resetUndoHistory(editor);
+      sendKeys(editor, ["c", "w", "Z", "\x1b"]);
+      // pi-vim's cw includes the trailing whitespace (documented behavior),
+      // so the whole "foo " is replaced.
+      assert.equal(editor.getText(), "Zbar");
+      const afterChangeCursor = editor.getCursor();
+      sendKeys(editor, ["u"]);
+      assert.equal(editor.getText(), "foo bar");
+      sendKeys(editor, ["\x12"]);
+      assert.equal(editor.getText(), "Zbar");
+      assert.deepEqual(editor.getCursor(), afterChangeCursor);
     });
   });
 });

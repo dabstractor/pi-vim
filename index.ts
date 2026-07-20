@@ -104,6 +104,7 @@ type ModalEditorInternals = {
   tui?: { requestRender?: () => void };
   pushUndoSnapshot?: () => void;
   setCursorCol?: (col: number) => void;
+  undoStack?: { stack: unknown[] };
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
@@ -645,6 +646,22 @@ export class ModalEditor extends CustomEditor {
   private readonly redoStack: EditorSnapshot[] = [];
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
+  /**
+   * Vim groups an entire change (insert session, change-with-insert, or an
+   * atomic normal-mode edit) into a single base-editor undo unit. While a
+   * change is in progress this holds the bracket; `endChange` collapses the
+   * base undoStack so exactly one snapshot — the pre-change state — remains.
+   */
+  private changeGroup: {
+    startStackLen: number;
+    startText: string;
+  } | null = null;
+  /**
+   * Length of the base undoStack at the start of the current `handleInput`
+   * turn. Used to open a change group that spans a preceding mutation (the
+   * delete of `cw`, the newline of `o`) together with the following insert.
+   */
+  private turnStartStackLen: number = 0;
   private readonly labelColorizers: ModeColorizers | null;
   private readonly borderColorizers: ModeColorizers | null;
   private readonly cursorShapeRuntime: CursorShapeRuntime | null;
@@ -750,9 +767,70 @@ export class ModalEditor extends CustomEditor {
         // mode-change side effects must never break editing
       }
     }
+    if (mode === "insert" && prev !== "insert") {
+      this.openInsertChangeGroup();
+    }
+  }
+
+  /**
+   * Open a Vim change group when entering insert mode. The group spans any
+   * mutation already performed this turn (the delete of `cw`/`cc`/`s`, the
+   * newline of `o`/`O`) together with the upcoming insert typing, so the whole
+   * change collapses to a single undo unit on `<Esc>`. Resetting the base
+   * editor's `lastAction` guarantees the first typed character pushes a fresh
+   * anchor snapshot even when the previous session left coalescing state behind.
+   */
+  private openInsertChangeGroup(): void {
+    if (this.changeGroup !== null) return; // already bracketed (re-entrant insert entry)
+    const editor = this as unknown as ModalEditorInternals;
+    const stack = editor.undoStack?.stack;
+    if (!stack) return;
+    const startStackLen = Math.min(this.turnStartStackLen, stack.length);
+    this.changeGroup = { startStackLen, startText: this.getText() };
+    editor.lastAction = null;
+  }
+
+  /**
+   * Close the current change group, collapsing the base undoStack so the change
+   * owns exactly one entry holding the pre-change buffer/cursor state. A no-op
+   * change (e.g. `i<Esc>` with no typing) leaves history untouched. The collapse
+   * trims the stack directly (no `setText`/`onChange`), so it never spuriously
+   * trips `centralInvalidationCheck`.
+   */
+  private endChange(): void {
+    const group = this.changeGroup;
+    this.changeGroup = null;
+    if (!group) return;
+    const editor = this as unknown as ModalEditorInternals;
+    const stack = editor.undoStack?.stack;
+    if (!stack) return;
+
+    if (this.getText() === group.startText) {
+      // Nothing was mutated; drop the anchor this group may have pushed so the
+      // prior history is preserved exactly.
+      if (stack.length > group.startStackLen) {
+        stack.length = group.startStackLen;
+      }
+      return;
+    }
+
+    // Collapse: keep only the first snapshot pushed inside the group. That
+    // snapshot (the delete of a change operator, the newline of `o`, or the
+    // first typed character of a pure insert) already captured the pre-change
+    // buffer and the change-start cursor.
+    const targetLen = group.startStackLen + 1;
+    if (stack.length > targetLen) {
+      stack.length = targetLen;
+    }
+  }
+
+  /** Discard any open change group without collapsing (undo/redo/reset). */
+  private discardChangeGroup(): void {
+    this.changeGroup = null;
   }
 
   override setText(text: string): void {
+    this.discardChangeGroup();
     this.clearRedoStack();
     super.setText(text);
   }
@@ -831,6 +909,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performUndo(count: number = this.takeTotalCount(1)): void {
+    this.discardChangeGroup();
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     for (let i = 0; i < maxSteps; i++) {
       let changed = false;
@@ -849,6 +928,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
+    this.discardChangeGroup();
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     const editor = this as unknown as ModalEditorInternals;
 
@@ -1075,6 +1155,8 @@ export class ModalEditor extends CustomEditor {
 
   handleInput(data: string): void {
     this.ensureOnChangeHook();
+    this.turnStartStackLen =
+      (this as unknown as ModalEditorInternals).undoStack?.stack.length ?? 0;
 
     if (this.pendingExCommand !== null) {
       const normalized = this.normalizePendingExCommandInput(data);
@@ -1122,6 +1204,11 @@ export class ModalEditor extends CustomEditor {
     }
 
     if ("insert" === this.mode) {
+      // The editor starts in INSERT mode, so the very first insert session is
+      // entered without a `setMode("insert")` transition. Open a change group
+      // lazily here so that session collapses to one undo unit too. The call is
+      // a no-op once a group is already open (e.g. after entering via `i`).
+      this.openInsertChangeGroup();
       if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
         super.handleInput(CTRL_E);
         return;
@@ -1247,6 +1334,7 @@ export class ModalEditor extends CustomEditor {
       this.clearUnderlyingPasteStateIfActive();
       this.setMode("normal");
       if (this.getCursor().col > 0) this.moveCursorBy(-1);
+      this.endChange();
     } else {
       super.handleInput("\x1b"); // pass escape to abort agent
     }

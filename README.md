@@ -336,6 +336,10 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `<C-r>` | Redo one undone change in normal mode; safe no-op when redo history is empty |
 | `{count}<C-r>` | Redo up to `{count}` undone changes in order; clamps at available history and consumes count state (no leak to the next command) |
 
+A Vim **change** is a single undo unit: an entire insert session (`i`/`I`/`a`/`A`/`o`/`O` … `<Esc>`) and a whole change command (`cw`, `cc`, `s`, `S`, `C` … `<Esc>`) each collapse to one `u`. The editor boots in INSERT mode, so typing a message directly (without pressing `i` first) is one such session too. Typing `i hello world foo<Esc>` then `u` removes the whole sentence in one press; `cw bar baz<Esc>` then `u` restores the original word and discards the typed text together. Atomic normal-mode edits (`dd`, `x`, `dw`, `p`, `r`) remain one unit each. The underlying pi-tui word-coalescing is left untouched; the grouping is owned by the vim layer.
+
+Count-repeat for insert entries (`3i` … `<Esc>` repeating the typed text) is **not** supported on this branch — it shares machinery with the unimplemented `.` repeat, so `{count}i` inserts once and the count is consumed (no leak). The single insert session is still one undo unit.
+
 ---
 
 ## register and clipboard policy
