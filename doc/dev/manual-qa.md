@@ -149,14 +149,20 @@ widgets, or a second extension in the process. Run this group first.
 
 ### A7 — a wrapping extension's text injection cancels the recording
 
-- own session, launched from the repo checkout root:
+- own session, launched from the repo checkout root. Replace
+  `<path to your pi-image-attachments checkout>` with your local
+  `pi-image-attachments` checkout — for example
+  `~/src/pi-image-attachments`:
 
   ```bash
   pi --no-session --no-extensions --no-skills --no-prompt-templates \
     --no-themes --no-context-files \
-    -e ./index.ts -e ../pi-image-attachments/index.ts
+    -e ./index.ts -e <path to your pi-image-attachments checkout>/index.ts
   ```
 
+  A bare `../pi-image-attachments` only resolves when this repo sits
+  directly beside its siblings, which is not the case when the repo is
+  checked out in a git worktree, so give the checkout path explicitly.
   `pi-vim` must load first; see the wrapping section of `README.md`.
 - seed: `i` type `"alpha beta"` `<Esc>` `gg 0`
 - keys: press `c` `w` (insert mode, `alpha` gone), then paste or drag an
