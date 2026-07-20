@@ -3501,28 +3501,41 @@ describe("cursor shape rendering", () => {
     assertNoCursorShapeSequences(lines);
   });
 
-  it("preserves the software cursor while supported hardware cursor display is disabled", () => {
+  it("re-enables the hardware cursor when it has been disabled, restoring shape control", () => {
     const tui = createCursorShapeTui({ initialShowHardwareCursor: false });
     const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
     focusEditor(editor);
 
-    const disabledLines = editor.render(20);
-    const disabledMarkerLine = findCursorMarkerLine(disabledLines);
+    const lines = editor.render(20);
+    const markerLine = findCursorMarkerLine(lines);
 
-    assert.deepEqual(tui.terminalWrites, []);
-    assert.equal(tui.getShowHardwareCursorCalls, 1);
-    assert.equal(disabledMarkerLine.includes(SOFTWARE_CURSOR_SPACE), true);
-    assertNoCursorShapeSequences(disabledLines);
-
-    tui.setShowHardwareCursor?.(true);
-    const enabledLines = editor.render(20);
-    const enabledMarkerLine = findCursorMarkerLine(enabledLines);
-
+    // pi-vim owns cursor shaping, so a disabled (but supported) hardware
+    // cursor is re-enabled rather than falling back to a software block.
     assert.deepEqual(tui.hardwareCursorValues, [true]);
     assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
-    assert.equal(tui.getShowHardwareCursorCalls, 2);
-    assert.equal(enabledMarkerLine.includes(SOFTWARE_CURSOR_SPACE), false);
-    assertNoCursorShapeSequences(enabledLines);
+    assert.equal(tui.getShowHardwareCursorCalls, 1);
+    assert.equal(markerLine.includes(SOFTWARE_CURSOR_SPACE), false);
+    assertNoCursorShapeSequences(lines);
+  });
+
+  it("recovers cursor shape after the host disables the hardware cursor mid-session", () => {
+    // Models the reload regression: pi re-applies showHardwareCursor=false
+    // after pi-vim has already enabled it. The next render must re-assert and
+    // re-write the shape instead of leaving a stuck software block cursor.
+    const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
+    const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
+    focusEditor(editor);
+
+    editor.render(20);
+    assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
+
+    // Host (pi) disables the hardware cursor while the editor remains focused.
+    tui.setShowHardwareCursor?.(false);
+    tui.terminalWrites.length = 0;
+
+    editor.render(20);
+    assert.deepEqual(tui.hardwareCursorValues, [false, true]);
+    assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
   });
 
   it("keeps the software cursor when focused render has no cursor marker", () => {

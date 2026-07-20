@@ -4073,9 +4073,17 @@ export class ModalEditor extends CustomEditor {
     if (!this.cursorShapeRuntime) return;
     if (!hasPromptCursorMarker(lines)) return;
 
+    // Pi re-applies its `showHardwareCursor` setting on reload and on settings
+    // changes (applyRuntimeSettings), which resets the hardware cursor pi-vim
+    // relies on for shape control back to its default (off). When that happens
+    // pi falls back to a software block cursor and hides the hardware cursor,
+    // so the thin/thick shape never recovers. Re-assert ownership here so the
+    // next positioning pass re-shows the hardware cursor and we keep shaping.
     if (this.cursorShapeRuntime.getShowHardwareCursor?.() === false) {
+      this.cursorShapeRuntime.setShowHardwareCursor(true);
+      // The hardware cursor was hidden, so the terminal's current DECSCUSR
+      // shape may no longer match our cache; force a fresh write.
       this.lastCursorShapeSequence = null;
-      return;
     }
 
     stripSoftwareCursorWhenHardwareCursorIsUsed(lines);
