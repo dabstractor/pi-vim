@@ -139,6 +139,36 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+// `npm pack --json` changed its top-level shape across major versions.
+// Legacy npm (< 12) prints an array of pack-result objects; npm >= 12 prints
+// an object keyed by package name whose values are those same result objects.
+// Accept both and normalize to the first result so the gate stays portable
+// across whichever npm the caller happens to run.
+function extractPackResult(parsed: unknown): Record<string, unknown> {
+  let candidates: unknown[];
+
+  if (Array.isArray(parsed)) {
+    candidates = parsed;
+  } else if (isObject(parsed)) {
+    candidates = Object.values(parsed);
+  } else {
+    throw new Error(
+      "npm pack --dry-run --json returned an unrecognized JSON shape (expected an array or an object keyed by package name)",
+    );
+  }
+
+  if (candidates.length === 0) {
+    throw new Error("npm pack --dry-run --json returned no pack results");
+  }
+
+  const firstResult = candidates[0];
+  if (!isObject(firstResult)) {
+    throw new Error("npm pack --dry-run --json first result is not an object");
+  }
+
+  return firstResult;
+}
+
 function runPackDryRun(): PackResult {
   let rawOutput: string;
 
@@ -157,16 +187,7 @@ function runPackDryRun(): PackResult {
     );
   }
 
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error(
-      "npm pack --dry-run --json returned an unexpected JSON shape (expected non-empty array)",
-    );
-  }
-
-  const firstResult = parsed[0];
-  if (!isObject(firstResult)) {
-    throw new Error("npm pack --dry-run --json first result is not an object");
-  }
+  const firstResult = extractPackResult(parsed);
 
   const files = firstResult.files;
   const size = firstResult.size;
