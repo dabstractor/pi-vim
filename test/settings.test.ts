@@ -6,6 +6,7 @@ import {
   readPiVimBooleanSetting,
   readPiVimClipboardMirrorSetting,
   readPiVimExCommandSetting,
+  readPiVimGlobalExCommandSetting,
   readPiVimModeChange,
   readPiVimModeColors,
   resolveExCommandSettings,
@@ -407,8 +408,50 @@ describe("piVim exCommand settings reader", () => {
 });
 
 describe("piVim exCommand settings resolver", () => {
+  it("ignores project clipboard copy when the global setting uses its default", () => {
+    const global = { piVim: { exCommand: {} } };
+    const project = {
+      piVim: { exCommand: { copyInputToClipboard: true } },
+    };
+    const resolved = resolveExCommandSettings(
+      readPiVimExCommandSetting(global, project),
+      readPiVimGlobalExCommandSetting(global, project),
+    );
+
+    assert.equal(resolved.settings.copyInputToClipboard, false);
+  });
+
+  it("reads global clipboard copy through a project exCommand object", () => {
+    const global = {
+      piVim: { exCommand: { copyInputToClipboard: true } },
+    };
+    const project = { piVim: { exCommand: { piDispatch: true } } };
+    const resolved = resolveExCommandSettings(
+      readPiVimExCommandSetting(global, project),
+      readPiVimGlobalExCommandSetting(global, project),
+    );
+
+    assert.equal(resolved.settings.copyInputToClipboard, true);
+  });
+
+  it("honors project piDispatch while clipboard copy stays global-only", () => {
+    const global = {
+      piVim: { exCommand: { copyInputToClipboard: true } },
+    };
+    const project = { piVim: { exCommand: { piDispatch: false } } };
+    const resolved = resolveExCommandSettings(
+      readPiVimExCommandSetting(global, project),
+      readPiVimGlobalExCommandSetting(global, project),
+    );
+
+    assert.deepEqual(resolved.settings, {
+      piDispatch: false,
+      copyInputToClipboard: true,
+    });
+  });
+
   it("defaults to dispatch on and clipboard copy off", () => {
-    const resolved = resolveExCommandSettings(undefined);
+    const resolved = resolveExCommandSettings(undefined, undefined);
 
     assert.deepEqual(resolved.settings, {
       piDispatch: true,
@@ -418,16 +461,17 @@ describe("piVim exCommand settings resolver", () => {
   });
 
   it("does not hand out the shared defaults object", () => {
-    const resolved = resolveExCommandSettings(undefined);
+    const resolved = resolveExCommandSettings(undefined, undefined);
 
     assert.notEqual(resolved.settings, DEFAULT_EX_COMMAND_SETTINGS);
   });
 
   it("reads both boolean keys", () => {
-    const resolved = resolveExCommandSettings({
+    const value = {
       piDispatch: false,
       copyInputToClipboard: true,
-    });
+    };
+    const resolved = resolveExCommandSettings(value, value);
 
     assert.deepEqual(resolved.settings, {
       piDispatch: false,
@@ -437,7 +481,8 @@ describe("piVim exCommand settings resolver", () => {
   });
 
   it("keeps defaults for keys that are absent", () => {
-    const resolved = resolveExCommandSettings({ copyInputToClipboard: true });
+    const value = { copyInputToClipboard: true };
+    const resolved = resolveExCommandSettings(value, value);
 
     assert.deepEqual(resolved.settings, {
       piDispatch: true,
@@ -448,7 +493,7 @@ describe("piVim exCommand settings resolver", () => {
 
   it("warns and defaults when the value is not an object", () => {
     for (const value of ["yes", 1, null, [], true]) {
-      const resolved = resolveExCommandSettings(value);
+      const resolved = resolveExCommandSettings(value, value);
 
       assert.deepEqual(resolved.settings, {
         piDispatch: true,
@@ -462,10 +507,11 @@ describe("piVim exCommand settings resolver", () => {
   });
 
   it("warns and defaults per key when a key is not a boolean", () => {
-    const resolved = resolveExCommandSettings({
+    const value = {
       piDispatch: "true",
       copyInputToClipboard: 1,
-    });
+    };
+    const resolved = resolveExCommandSettings(value, value);
 
     assert.deepEqual(resolved.settings, {
       piDispatch: true,
@@ -478,10 +524,11 @@ describe("piVim exCommand settings resolver", () => {
   });
 
   it("keeps a valid key when a sibling key is invalid", () => {
-    const resolved = resolveExCommandSettings({
+    const value = {
       piDispatch: false,
       copyInputToClipboard: "on",
-    });
+    };
+    const resolved = resolveExCommandSettings(value, value);
 
     assert.deepEqual(resolved.settings, {
       piDispatch: false,

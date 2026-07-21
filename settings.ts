@@ -20,6 +20,7 @@ export type ExCommandSettings = {
 export type PiVimSettings = {
   clipboardMirror?: unknown;
   exCommand?: unknown;
+  globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
   modeChange?: ModeChangeSettings;
   syncBorderColorWithMode?: boolean;
@@ -33,7 +34,6 @@ export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
 const M = Symbol(),
   C = ["insert", "normal", "visual", "ex"] as const,
   MC = ["insert", "normal"] as const,
-  EX = ["piDispatch", "copyInputToClipboard"] as const,
   T = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const rec = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -84,27 +84,46 @@ export function readPiVimExCommandSetting(g: unknown, p: unknown) {
   return v === M ? undefined : v;
 }
 
-export function resolveExCommandSettings(value: unknown): {
+export function readPiVimGlobalExCommandSetting(g: unknown, p: unknown) {
+  void p;
+  // Copying the prompt to the OS clipboard is an exfiltration capability, so
+  // only the user-global settings file is trusted. Project settings may be
+  // checked into a repo and must not be able to enable clipboard writes.
+  const v = get(g, "exCommand");
+  return v === M ? undefined : v;
+}
+
+export function resolveExCommandSettings(
+  value: unknown,
+  globalValue: unknown,
+): {
   settings: ExCommandSettings;
   warning?: string;
 } {
   const settings = { ...DEFAULT_EX_COMMAND_SETTINGS };
-  if (value === undefined) return { settings };
-  if (!rec(value)) {
+  let invalidObject = false;
+  const invalid: string[] = [];
+  for (const [k, source] of [
+    ["piDispatch", value],
+    ["copyInputToClipboard", globalValue],
+  ] as const) {
+    if (source === undefined) continue;
+    if (!rec(source)) {
+      invalidObject = true;
+      continue;
+    }
+    if (!Object.hasOwn(source, k)) continue;
+    const v = source[k];
+    if (typeof v === "boolean") settings[k] = v;
+    else invalid.push(k);
+  }
+
+  if (invalidObject) {
     return {
       settings,
       warning: "Invalid piVim.exCommand; expected an object.",
     };
   }
-
-  const invalid: string[] = [];
-  for (const k of EX) {
-    if (!Object.hasOwn(value, k)) continue;
-    const v = value[k];
-    if (typeof v === "boolean") settings[k] = v;
-    else invalid.push(k);
-  }
-
   if (!invalid[0]) return { settings };
   return {
     settings,
@@ -150,6 +169,7 @@ function disk(cwd: string): PiVimSettings {
   return {
     clipboardMirror: readPiVimClipboardMirrorSetting(g, p),
     exCommand: readPiVimExCommandSetting(g, p),
+    globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     modeChange: readPiVimModeChange(g, p),
     syncBorderColorWithMode: readPiVimBooleanSetting(

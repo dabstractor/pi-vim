@@ -3726,7 +3726,10 @@ export default function (pi: ExtensionAPI) {
     if (clipboardMirrorPolicy.warning && ctx.hasUI) {
       ctx.ui.notify(clipboardMirrorPolicy.warning, "warning");
     }
-    const exCommand = resolveExCommandSettings(piVimSettings.exCommand);
+    const exCommand = resolveExCommandSettings(
+      piVimSettings.exCommand,
+      piVimSettings.globalExCommand,
+    );
     if (exCommand.warning && ctx.hasUI) {
       ctx.ui.notify(exCommand.warning, "warning");
     }
