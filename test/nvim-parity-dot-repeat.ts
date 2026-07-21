@@ -164,6 +164,11 @@ const DOT_REPEAT_FINAL_STATE_CASES: NvimParityCase[] = [
     },
     keys: ["P", "w", "y", "i", "w", "0", "."],
   },
+  {
+    name: ". repeats the last change after a visual yank",
+    initial: { text: "abcdef", cursor: { line: 0, col: 0 } },
+    keys: ["x", "v", "l", "y", "."],
+  },
   // Counted change through insert mode: `s` supports a count, and a plain `.`
   // afterward replays the recorded count together with the typed text.
   {

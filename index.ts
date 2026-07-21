@@ -1848,9 +1848,9 @@ export class ModalEditor extends CustomEditor {
     linewise: boolean,
   ): void {
     this.takeTotalCount(1);
-    // Visual edits are excluded from dot-repeat; drop the stale command so `.`
-    // cannot replay an older change the user has since moved past.
-    this.clearRepeatState();
+    // Mutating visual edits are excluded from dot-repeat and supersede the
+    // older change. A visual yank is not a change, so it preserves that repeat.
+    if (operator !== "y") this.clearRepeatState();
 
     // Both branches resolve the selection before dropping the anchor.
     const anchor = this.getVisualAnchor();
