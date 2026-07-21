@@ -10,6 +10,8 @@ Behavior the harnesses cannot reach — the terminal, Pi's own prompt widgets, a
 
 `doc/dev/scoreboard.md` is generated, never hand-written: it reports parity, unit, performance, and package-footprint numbers straight from the harnesses. Run `npm run scoreboard -- --write` after a branch changes parity coverage, adds a benchmark, or moves a `pack:check` budget.
 
+Perf and hot-path changes — pull requests included — must clear the evidence bar in `doc/dev/render-perf-strategy.md`: land before/after benchmarks on the documented input set, and defer by default when there are no numbers.
+
 When reviewing changes — including agent self-review before opening or merging a PR — follow `doc/review-guidelines.md`; its project-specific MUST-flag rules take precedence over general review heuristics.
 
 npm publishing is automated in CI (`.github/workflows/publish.yml`): every push to `main` publishes the `package.json` version if it is not already on npm. Do not run `npm publish` or ask for publish access — to release, bump the version in `package.json`.
