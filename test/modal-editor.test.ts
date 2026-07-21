@@ -3192,6 +3192,56 @@ describe("mode color settings", () => {
     }
   });
 
+  it("syncBorderColorWithMode inherit applies the same token rule to the visual mode", async () => {
+    // The visual color key follows the same token-based precedence as the
+    // other modes: its default token (customMessageLabel) is not borderMuted,
+    // so a neutral border paints the visual color and an active thinking
+    // level is deferred to.
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      insert: "borderAccent",
+      normal: "borderMuted",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingOff", text);
+      sendKeys(editor, ["h", "i", "\x1b", "v"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<customMessageLabel>border</customMessageLabel>",
+        "visual paints its color when thinking is off",
+      );
+
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+      assert.equal(
+        editor.borderColor("border"),
+        "<thinkingMinimal>border</thinkingMinimal>",
+        "visual (non-muted) defers to the active thinking level",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("syncBorderColorWithMode inherit lets a borderMuted visual mode win over thinking", async () => {
+    const theme = createRecordingTheme();
+    const { editor, restore } = await createInheritBorderEditor(theme, {
+      visual: "borderMuted",
+    });
+
+    try {
+      editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
+      sendKeys(editor, ["h", "i", "\x1b", "v"]);
+      assert.equal(
+        editor.borderColor("border"),
+        "<borderMuted>border</borderMuted>",
+        "visual set to borderMuted wins over the active thinking level",
+      );
+    } finally {
+      restore();
+    }
+  });
+
   for (const [name, commandKeys] of [
     ["i", ["i"]],
     ["a", ["a"]],
