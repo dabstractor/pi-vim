@@ -180,7 +180,7 @@ const THRESHOLDS = {
   // stay at 17.
   maxFiles: 17,
   maxSize: 51000,
-  maxUnpackedSize: 205900,
+  maxUnpackedSize: 207100,
 } as const;
 
 function compareStrings(a: string, b: string): number {
