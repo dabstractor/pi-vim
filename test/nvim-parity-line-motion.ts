@@ -83,6 +83,51 @@ const LINE_MOTION_PARITY_CASES: NvimParityCase[] = [
     keys: ["g", "M"],
   },
   {
+    name: "1gM: moves near the start of the text",
+    initial: { text: "0123456789", cursor: { line: 0, col: 5 } },
+    keys: ["1", "g", "M"],
+  },
+  {
+    name: "20gM: moves to that percentage of the line text",
+    initial: { text: "0123456789", cursor: { line: 0, col: 5 } },
+    keys: ["2", "0", "g", "M"],
+  },
+  {
+    name: "50gM: matches uncounted gM at the halfway point",
+    initial: { text: "0123456789", cursor: { line: 0, col: 0 } },
+    keys: ["5", "0", "g", "M"],
+  },
+  {
+    name: "60gM: rounds the percentage down on an odd-length line",
+    initial: { text: "abcde", cursor: { line: 0, col: 0 } },
+    keys: ["6", "0", "g", "M"],
+  },
+  {
+    name: "90gM: moves near the end of a whitespace-padded line",
+    initial: { text: "   hello world   ", cursor: { line: 0, col: 0 } },
+    keys: ["9", "0", "g", "M"],
+  },
+  {
+    name: "100gM: clamps to the final character",
+    initial: { text: "0123456789", cursor: { line: 0, col: 0 } },
+    keys: ["1", "0", "0", "g", "M"],
+  },
+  {
+    name: "150gM: ignores counts above 100 and moves halfway",
+    initial: { text: "0123456789", cursor: { line: 0, col: 0 } },
+    keys: ["1", "5", "0", "g", "M"],
+  },
+  {
+    name: "gM: stays put on an empty line",
+    initial: { text: "", cursor: { line: 0, col: 0 } },
+    keys: ["g", "M"],
+  },
+  {
+    name: "50gMx: consumes the count and deletes exactly one character",
+    initial: { text: "0123456789", cursor: { line: 0, col: 0 } },
+    keys: ["5", "0", "g", "M", "x"],
+  },
+  {
     name: "gg: moves to the first line with nvim cursor placement",
     initial: { text: "one\ntwo\nthree", cursor: { line: 2, col: 2 } },
     keys: ["g", "g"],

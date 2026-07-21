@@ -3951,6 +3951,66 @@ describe("buffer motions — gg / G", () => {
   });
 });
 
+describe("halfway motion — gM / {count}gM", () => {
+  it("gM moves to halfway the text of the line", () => {
+    const { editor } = createEditorWithSpy("0123456789");
+
+    sendKeys(editor, ["g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("50gMx consumes the count and deletes exactly one character", () => {
+    const { editor } = createEditorWithSpy("0123456789");
+
+    sendKeys(editor, ["5", "0", "g", "M", "x"]);
+
+    assert.equal(editor.getText(), "012346789");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+    assert.equal(editor.getRegister(), "5");
+  });
+
+  it("20gM moves to that percentage of the line text", () => {
+    const { editor } = createEditorWithSpy("0123456789");
+
+    sendKeys(editor, ["2", "0", "g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
+  });
+
+  it("100gM clamps to the final character", () => {
+    const { editor } = createEditorWithSpy("0123456789");
+
+    sendKeys(editor, ["1", "0", "0", "g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 9 });
+  });
+
+  it("150gM ignores counts above 100 and moves halfway", () => {
+    const { editor } = createEditorWithSpy("0123456789");
+
+    sendKeys(editor, ["1", "5", "0", "g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 5 });
+  });
+
+  it("gM stays put on an empty line", () => {
+    const { editor } = createEditorWithSpy("");
+
+    sendKeys(editor, ["g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("gM counts graphemes, not code units", () => {
+    const { editor } = createEditorWithSpy("😀😀😀😀");
+
+    sendKeys(editor, ["g", "M"]);
+
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 4 });
+  });
+});
+
 describe("first non-whitespace motion — ^", () => {
   it("^ moves to the first non-whitespace character", () => {
     const { editor } = createEditorWithSpy("    foo");

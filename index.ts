@@ -2198,10 +2198,21 @@ export class ModalEditor extends CustomEditor {
         }
 
         if (data === "M") {
+          // :h gM — halfway the text of the line; with a count of 1..100,
+          // to that percentage of the line's text. nvim ignores counts
+          // above 100 (falls back to halfway) and clamps 100gM to the
+          // last character. nvim measures screen cells (linetabsize);
+          // pi-vim measures graphemes — an intentional divergence for
+          // tabs and double-width characters.
+          const count = this.takeTotalCount(0);
           const { line } = this.getCurrentLineAndCol();
           const graphemes = getLineGraphemes(line);
-          const middle = Math.floor(graphemes.length / 2);
-          this.moveCursorToCol(graphemes[middle]?.start ?? 0);
+          const target =
+            count >= 1 && count <= 100
+              ? Math.floor((graphemes.length * count) / 100)
+              : Math.floor(graphemes.length / 2);
+          const clamped = Math.min(target, graphemes.length - 1);
+          this.moveCursorToCol(graphemes[clamped]?.start ?? 0);
           return;
         }
       }

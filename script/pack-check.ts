@@ -169,6 +169,15 @@ const THRESHOLDS = {
   // (tests are excluded from the package). Measured packed 50585 B, unpacked
   // 205430 B. Budgets bumped 49400 -> 51000 and 200600 -> 205900, leaving
   // ~415 B / ~470 B headroom. Files stay at 17.
+  //
+  // gM motion with {count} percentage: index.ts adds the gM branch (halfway
+  // the text of the line), consumes the pending count so 50gMx deletes one
+  // character instead of fifty, and honors nvim's counted form — 1..100
+  // moves to that percentage of the line's text, higher counts fall back to
+  // halfway. Plus the README navigation row for gM/{count}gM. Measured
+  // packed 49278 B, unpacked 201240 B. The packed budget still fits;
+  // unpacked is bumped 200600 -> 201600, leaving ~360 B headroom. Files
+  // stay at 17.
   maxFiles: 17,
   maxSize: 51000,
   maxUnpackedSize: 205900,
