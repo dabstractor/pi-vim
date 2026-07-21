@@ -43,6 +43,16 @@ const VISUAL_MODE_PARITY_CASES: NvimParityCase[] = [
     keys: ["v", "l", "l"],
   },
   {
+    name: "v9l clamps at the final character of the current line",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
+    keys: ["v", "9", "l"],
+  },
+  {
+    name: "v9h clamps at the first column of the current line",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 2 } },
+    keys: ["v", "9", "h"],
+  },
+  {
     name: "o swaps the selection ends",
     initial: { text: "hello", cursor: { line: 0, col: 1 } },
     keys: ["v", "l", "l", "o"],
@@ -64,6 +74,11 @@ const VISUAL_CHARWISE_DELETE_PARITY_CASES: NvimParityCase[] = [
     name: "vlld deletes a forward selection",
     initial: { text: "hello", cursor: { line: 0, col: 1 } },
     keys: ["v", "l", "l", "d"],
+  },
+  {
+    name: "v9lY operates only on the current line",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
+    keys: ["v", "9", "l", "Y"],
   },
   {
     name: "vhhd deletes a backward selection",

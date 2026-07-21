@@ -2050,7 +2050,17 @@ export class ModalEditor extends CustomEditor {
       if (supportsCountedNav) {
         const count = this.takeTotalCount(1);
         const clamped = Math.min(count, MAX_COUNT);
-        if (data === "h") {
+        if ((data === "h" || data === "l") && isVisualMode(this.mode)) {
+          const { line, col } = this.getCurrentLineAndCol();
+          const graphemes = getLineGraphemes(line);
+          const currentIndex = graphemes.findIndex(({ end }) => col < end);
+          const graphemeIndex =
+            currentIndex === -1 ? graphemes.length : currentIndex;
+          const availableSteps =
+            data === "h" ? graphemeIndex : graphemes.length - graphemeIndex;
+          const steps = Math.min(clamped, availableSteps);
+          this.moveCursorBy(data === "h" ? -steps : steps);
+        } else if (data === "h") {
           this.moveCursorBy(-clamped);
         } else if (data === "l") {
           this.moveCursorBy(clamped);
