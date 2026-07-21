@@ -707,6 +707,25 @@ The dangerous version of A8, now that the ex line can run real commands.
   still dispatches (the default is on). Remove the setting afterwards.
 - reset: `<Esc> gg dG`; delete the setting.
 
+### H10 — `:!cmd` runs a shell command through Pi's bash mode
+
+The `!` analogue of H1: a bare leading `!` submits the line through the same
+seam, reaching Pi's bash mode instead of a slash command.
+
+- seed: `i`, type a distinctive prompt, then `<Esc>` and move the cursor into
+  the middle of the line.
+- keys: `<Esc>`, then `:` `!` `l` `s` `<Enter>`.
+- expect: Pi runs `ls` exactly as if you had typed `!ls` and pressed `<Enter>`
+  in the prompt; the bash output appears in the chat. The composed prompt text
+  and the cursor are unchanged afterwards (same save/restore as H3). `:!!ls`
+  runs it excluded from context; `:!` alone shows `Unsupported ex command: :!`.
+- keys (precedence): `:` `q` `!` `<Enter>` on a non-empty prompt still force
+  quits — the `:q!` family is claimed before any `!`-prefix shell dispatch.
+- keys (paste safety): copy `!rm -rf .` plus a newline and a second line, then
+  `:` and paste — the footer holds ` EX :!rm -rf ._ ` and runs nothing until a
+  typed `<Enter>`.
+- reset: `<Esc> gg dG`
+
 ---
 
 ## coverage map
@@ -730,6 +749,7 @@ The dangerous version of A8, now that the ex line can run real commands.
 | pasted newline never submits an ex command | `test/modal-editor.test.ts` (simulated markers) | A8 |
 | ex name resolution (quit / reserved / known / unknown) | `test/modal-editor.test.ts` | H5, H6 |
 | ex dispatch reaches a real Pi command | `test/modal-editor.test.ts` (spy only) | H1, H2 |
+| `:!cmd` shell dispatch (leading `!`, `:!!`, `:!`, `:q!` precedence, paste) | `test/modal-editor.test.ts` (spy only) | H10 |
 | prompt survives a dispatch | `test/modal-editor.test.ts` (synchronous routes) | **H3** |
 | dispatch is transparent to undo / redo / `.` | `test/modal-editor.test.ts` | H4 |
 | pasted command name never auto-dispatches | `test/modal-editor.test.ts` (simulated markers) | H7 |

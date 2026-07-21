@@ -2219,6 +2219,100 @@ describe("ex pi-command bridge", () => {
     assert.equal(session.quitCalls, 1);
   });
 
+  it("dispatches :!cmd as a shell command through the submit seam", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "!ls -la");
+
+    assert.deepEqual(session.dispatched, ["!ls -la"]);
+    assert.deepEqual(session.notifications, []);
+    assert.equal(session.editor.getMode(), "normal");
+  });
+
+  it("submits the shell line verbatim, including internal whitespace", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "!echo  hi   there");
+
+    assert.deepEqual(session.dispatched, ["!echo  hi   there"]);
+  });
+
+  it("passes :!!cmd through as Pi's no-context bash form", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "!!git status");
+
+    assert.deepEqual(session.dispatched, ["!!git status"]);
+    assert.deepEqual(session.notifications, []);
+  });
+
+  it("restores the composed prompt after a shell dispatch", () => {
+    const session = createBridgeSession("keep me");
+
+    runEx(session.editor, "!ls");
+
+    assert.deepEqual(session.dispatched, ["!ls"]);
+    assert.equal(session.editor.getText(), "keep me");
+  });
+
+  it("does not let the shell branch shadow the :q! quit form", () => {
+    const session = createBridgeSession("hello");
+
+    runEx(session.editor, "q!");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.equal(session.quitCalls, 1);
+  });
+
+  it("reports :!! with no command as unsupported", () => {
+    const session = createBridgeSession("");
+
+    runEx(session.editor, "!!");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :!!"]);
+  });
+
+  it("does not dispatch a shell command when piDispatch is off", () => {
+    const session = createBridgeSession("");
+    session.editor.setExCommandSettings({
+      piDispatch: false,
+      copyInputToClipboard: false,
+    });
+
+    runEx(session.editor, "!ls");
+
+    assert.deepEqual(session.dispatched, []);
+    assert.deepEqual(session.notifications, ["Unsupported ex command: :!ls"]);
+  });
+
+  it("copies the prompt before a shell dispatch when the setting is on", () => {
+    const session = createBridgeSession("secret prompt");
+    session.editor.setClipboardMirrorPolicy("never");
+    session.editor.setExCommandSettings({
+      piDispatch: true,
+      copyInputToClipboard: true,
+    });
+
+    runEx(session.editor, "!ls");
+
+    assert.deepEqual(session.clipboardWrites, ["secret prompt"]);
+    assert.deepEqual(session.dispatched, ["!ls"]);
+  });
+
+  it("never submits a pasted shell command without a typed enter", () => {
+    const session = createBridgeSession("");
+
+    sendKeys(session.editor, [":", "\x1b[200~!rm -rf .\nrest\x1b[201~"]);
+
+    assert.deepEqual(session.dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :!rm -rf ._ "));
+
+    sendKeys(session.editor, ["\r"]);
+
+    assert.deepEqual(session.dispatched, ["!rm -rf ."]);
+  });
+
   it("does not dispatch a pasted command name without a typed enter", () => {
     const session = createBridgeSession("");
 

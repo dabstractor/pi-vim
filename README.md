@@ -180,6 +180,7 @@ Quit flows, plus a bridge that runs Pi slash commands from the ex line.
 | `:quit!` / `:qall!` / `:quitall!` | Long aliases with the same force quit policy as `:q!` |
 | `:{command}` | Run the Pi slash command of that name, e.g. `:tree` runs `/tree` |
 | `:{command} {args}` | Run it with everything after the first whitespace run, e.g. `:model opus` runs `/model opus` |
+| `:!{cmd}` | Run `{cmd}` in Pi's shell via `!{cmd}`, e.g. `:!ls` runs `!ls`; `:!!{cmd}` runs it excluded from context |
 | reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
 | unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
 
@@ -191,10 +192,11 @@ This is a bridge to Pi's command registry, not vim ex-command support. `:name` i
 
 An ex line resolves in a fixed order:
 
-1. **quit names win** — the `:q` family above, unchanged.
-2. **reserved names win next** — `s`, `g`, `v`, `d`, `m`, `t`, `co`, `j`, `w`, `r`, `normal`, `sort`, `&`, `>`, `<` are held for future vim ex semantics. They are never dispatched, even if a Pi command of the same name is installed; use `/w` for that. A trailing `!` is stripped for this check, so `:w!` is reserved too.
-3. **known Pi commands dispatch** — the union of Pi's builtins and whatever `pi.getCommands()` reports at the moment you press `Enter`, so a command registered mid-session is reachable without a restart.
-4. **anything else is unsupported** — a warning notification. A typo never reaches the LLM as a message.
+1. **quit names win** — the `:q` family above, unchanged. `:q!` is a quit form, so a leading `!` here never dispatches to the shell.
+2. **`:!cmd` dispatches to the shell** — a bare leading `!` submits the line through the same seam, so `:!ls` is exactly typing `!ls` and pressing `Enter` in Pi's bash mode (`:!!cmd` excludes it from context). `:!` with no command is unsupported.
+3. **reserved names win next** — `s`, `g`, `v`, `d`, `m`, `t`, `co`, `j`, `w`, `r`, `normal`, `sort`, `&`, `>`, `<` are held for future vim ex semantics. They are never dispatched, even if a Pi command of the same name is installed; use `/w` for that. A trailing `!` is stripped for this check, so `:w!` is reserved too.
+4. **known Pi commands dispatch** — the union of Pi's builtins and whatever `pi.getCommands()` reports at the moment you press `Enter`, so a command registered mid-session is reachable without a restart.
+5. **anything else is unsupported** — a warning notification. A typo never reaches the LLM as a message.
 
 Names match exactly and case-sensitively: `:tree` works, `:tre` and `:tree!` do not.
 
@@ -435,7 +437,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
 | Registers / macros / search | Not implemented | Supported |
-| Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms) and dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`); vim ex semantics are reserved, not implemented | Full ex command-line surface |
+| Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---

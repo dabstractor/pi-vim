@@ -145,9 +145,16 @@ const THRESHOLDS = {
   // Plus a README paragraph documenting the behavior. Measured packed 47580 B,
   // unpacked 196332 B. Budgets bumped 46900 -> 47900 and 193700 -> 196600,
   // leaving ~320 B / ~268 B headroom. Files stay at 17.
+  //
+  // `:!cmd` shell dispatch through the EX bridge: index.ts routes a bare leading
+  // `!` ex line through the shared submit seam so it reaches Pi's bash mode,
+  // with the same save/restore and paste-safety as slash dispatch. Plus README
+  // rows/precedence documenting it. Measured packed 48014 B, unpacked 197664 B.
+  // Budgets bumped 47900 -> 48400 and 196600 -> 198000, leaving ~386 B / ~336 B
+  // headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 47900,
-  maxUnpackedSize: 196600,
+  maxSize: 48400,
+  maxUnpackedSize: 198000,
 } as const;
 
 function compareStrings(a: string, b: string): number {

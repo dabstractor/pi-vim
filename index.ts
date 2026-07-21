@@ -1391,6 +1391,21 @@ export class ModalEditor extends CustomEditor {
       return;
     }
 
+    // `:!cmd` submits `!cmd` through the same seam the slash bridge uses, so it
+    // reaches Pi's bash mode: `onSubmit` runs a leading `!` as a shell command
+    // (`!!` excludes it from context). The quit check above already claimed the
+    // `:q!` family, so only a bare leading `!` lands here. `:!` with no command
+    // is unsupported, and piDispatch gates it like every other bridge dispatch.
+    if (command.startsWith("!")) {
+      const shellCommand = command.replace(/^!+/, "").trim();
+      if (shellCommand && this.exCommandSettings.piDispatch) {
+        this.dispatchThroughSubmit(command);
+      } else {
+        this.notifyFn(`Unsupported ex command: :${command}`);
+      }
+      return;
+    }
+
     const separator = command.search(/\s/);
     const name = separator === -1 ? command : command.slice(0, separator);
     const args = separator === -1 ? "" : command.slice(separator + 1).trim();
@@ -1428,12 +1443,16 @@ export class ModalEditor extends CustomEditor {
     };
   }
 
+  private dispatchSlashCommand(name: string, args: string): void {
+    this.dispatchThroughSubmit(args ? `/${name} ${args}` : `/${name}`);
+  }
+
   /**
-   * Run `/name args` through the editor's own submit path, then put the
-   * composed prompt back. Reapply the latest prompt state when an asynchronous
-   * submit settles too, because some builtin routes clear the prompt only after
-   * awaiting work. No command reads that buffer as an argument, so restoring
-   * the composed state is always semantically correct.
+   * Run a command line (`/name args` or `!cmd`) through the editor's own submit
+   * path, then put the composed prompt back. Reapply the latest prompt state
+   * when an asynchronous submit settles too, because some builtin routes clear
+   * the prompt only after awaiting work. No command reads that buffer as an
+   * argument, so restoring the composed state is always semantically correct.
    *
    * The dispatch is a side effect the user never typed, so it must leave no
    * trace: besides the text and cursor, the undo depth, the redo stack and the
@@ -1441,7 +1460,7 @@ export class ModalEditor extends CustomEditor {
    * dispatch's own `setText("")` would sit on the undo stack and swallow the
    * next `u`.
    */
-  private dispatchSlashCommand(name: string, args: string): void {
+  private dispatchThroughSubmit(commandLine: string): void {
     const dispatchState = this.captureDispatchState();
 
     if (
@@ -1453,7 +1472,7 @@ export class ModalEditor extends CustomEditor {
 
     let result: CommandDispatchResult;
     try {
-      result = this.runCommandFn(args ? `/${name} ${args}` : `/${name}`);
+      result = this.runCommandFn(commandLine);
     } finally {
       dispatchState.restore();
     }
