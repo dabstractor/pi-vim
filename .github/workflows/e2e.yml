@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 5 * * 1"
+permissions:
+  contents: read
 jobs:
   # Composes pi-vim with the third-party image-attachments extension.
   # Runs against the extension's GitHub main: the published 0.1.1 tarball
@@ -10,12 +12,17 @@ jobs:
   # registry-resolvable peers never shipped, so it fails at import.
   image-attachments:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: jordyvandomselaar/pi-image-attachments
           path: .e2e/pi-image-attachments
+          ref: 98708b49afe4ea5f8e3c1263e2373372872e999e # pinned to reviewed main; bump deliberately
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
