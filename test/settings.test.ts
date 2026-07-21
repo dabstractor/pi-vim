@@ -27,7 +27,7 @@ describe("piVim mode color settings reader", () => {
     );
   });
 
-  it("reads all three mode color settings", () => {
+  it("reads all four mode color settings", () => {
     assert.deepEqual(
       readPiVimModeColors(
         {
@@ -35,13 +35,29 @@ describe("piVim mode color settings reader", () => {
             modeColors: {
               insert: "muted",
               normal: "primary",
+              visual: "customMessageLabel",
               ex: "warning",
             },
           },
         },
         {},
       ),
-      { insert: "muted", normal: "primary", ex: "warning" },
+      {
+        insert: "muted",
+        normal: "primary",
+        visual: "customMessageLabel",
+        ex: "warning",
+      },
+    );
+  });
+
+  it("lets a project override the visual mode color", () => {
+    assert.deepEqual(
+      readPiVimModeColors(
+        { piVim: { modeColors: { visual: "globalVisual" } } },
+        { piVim: { modeColors: { visual: "projectVisual" } } },
+      ),
+      { visual: "projectVisual" },
     );
   });
 

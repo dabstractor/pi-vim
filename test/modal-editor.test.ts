@@ -757,6 +757,7 @@ function assertInsertBorderAfterModeChangingCommand(
     borderColorizers: {
       insert: (s: string) => `<insert>${s}</insert>`,
       normal: (s: string) => `<normal>${s}</normal>`,
+      visual: (s: string) => `<visual>${s}</visual>`,
       ex: (s: string) => `<ex>${s}</ex>`,
     },
   });
@@ -1239,9 +1240,13 @@ describe("ex mini-mode", () => {
         calls.push(`normal:${s}`);
         return `\x1b[34m${s}\x1b[39m`;
       },
+      visual: (s: string) => {
+        calls.push(`visual:${s}`);
+        return `\x1b[35m${s}\x1b[39m`;
+      },
       ex: (s: string) => {
         calls.push(`ex:${s}`);
-        return `\x1b[35m${s}\x1b[39m`;
+        return `\x1b[36m${s}\x1b[39m`;
       },
     };
     const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
@@ -1255,7 +1260,37 @@ describe("ex mini-mode", () => {
 
     assert.deepEqual(calls, ["ex: EX :_ "]);
     assert.ok(footer.includes(" EX :_ "));
-    assert.ok(footer.endsWith("\x1b[35m EX :_ \x1b[39m"));
+    assert.ok(footer.endsWith("\x1b[36m EX :_ \x1b[39m"));
+  });
+
+  it("renders VISUAL and V-LINE labels with the visual colorizer", () => {
+    const calls: string[] = [];
+    const colorizers = {
+      insert: (s: string) => `<insert>${s}</insert>`,
+      normal: (s: string) => {
+        calls.push(`normal:${s}`);
+        return `<normal>${s}</normal>`;
+      },
+      visual: (s: string) => {
+        calls.push(`visual:${s}`);
+        return `<visual>${s}</visual>`;
+      },
+      ex: (s: string) => `<ex>${s}</ex>`,
+    };
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      labelColorizers: colorizers,
+    });
+
+    // hi, Esc → normal, v → VISUAL, V → V-LINE.
+    sendKeys(editor, ["h", "i", "\x1b", "v"]);
+    const visualFooter = editor.render(80).at(-1) ?? "";
+    sendKeys(editor, ["V"]);
+    const vLineFooter = editor.render(80).at(-1) ?? "";
+
+    assert.ok(visualFooter.endsWith("<visual> VISUAL </visual>"));
+    assert.ok(vLineFooter.endsWith("<visual> V-LINE </visual>"));
+    // Visual modes use the visual colorizer, never collapsing to normal.
+    assert.deepEqual(calls, ["visual: VISUAL ", "visual: V-LINE "]);
   });
 
   it(":q refuses to quit when prompt has non-whitespace text", () => {
@@ -2133,6 +2168,36 @@ describe("mode color settings", () => {
       assert.deepEqual(
         theme.fgCalls.map((call) => call.token),
         ["borderMuted", "borderAccent", "warning"],
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("mode label uses the visual mode color token for VISUAL and V-LINE", async () => {
+    const theme = createRecordingTheme();
+    const restore = setPiVimSettingsReaderForTests(() => ({}));
+
+    try {
+      const extension = await installExtensionWithEditorFactory(theme);
+      const editor = extension.editorFactory(
+        stubTui,
+        stubTheme,
+        stubKeybindings,
+      );
+
+      sendKeys(editor, ["h", "i", "\x1b"]);
+      editor.render(80);
+      sendKeys(editor, ["v"]);
+      editor.render(80);
+      sendKeys(editor, ["V"]);
+      editor.render(80);
+
+      // Normal renders borderAccent; VISUAL and V-LINE both render the visual
+      // default (customMessageLabel), never collapsing onto normal's color.
+      assert.deepEqual(
+        theme.fgCalls.map((call) => call.token),
+        ["borderAccent", "customMessageLabel", "customMessageLabel"],
       );
     } finally {
       restore();

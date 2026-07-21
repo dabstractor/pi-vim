@@ -3,6 +3,7 @@ import { SettingsManager } from "@earendil-works/pi-coding-agent";
 export type ModeColorSettings = {
   insert?: string;
   normal?: string;
+  visual?: string;
   ex?: string;
 };
 
@@ -30,7 +31,7 @@ export const DEFAULT_EX_COMMAND_SETTINGS: ExCommandSettings = {
 };
 
 const M = Symbol(),
-  C = ["insert", "normal", "ex"] as const,
+  C = ["insert", "normal", "visual", "ex"] as const,
   MC = ["insert", "normal"] as const,
   EX = ["piDispatch", "copyInputToClipboard"] as const,
   T = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;

@@ -350,7 +350,9 @@ export class ModalEditor extends CustomEditor {
 
   private getActiveMode(): ModeColorKey {
     if (this.pendingExCommand !== null) return "ex";
-    return this.mode === "insert" ? "insert" : "normal";
+    if (this.mode === "insert") return "insert";
+    if (isVisualMode(this.mode)) return "visual";
+    return "normal";
   }
 
   private installModeBorderColorizer(): void {

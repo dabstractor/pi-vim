@@ -27,6 +27,7 @@ Default-equivalent `settings.json`:
     "modeColors": {
       "insert": "borderMuted",
       "normal": "borderAccent",
+      "visual": "customMessageLabel",
       "ex": "warning"
     },
     "syncBorderColorWithMode": false
@@ -61,6 +62,8 @@ pi-vim does not bundle `im-select` and does not care which tool you use — any 
 ### mode colors
 
 `piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use defaults above.
+
+`visual` colors both VISUAL and V-LINE (the footer label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
 
 Usual/safest: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
 

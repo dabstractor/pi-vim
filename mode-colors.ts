@@ -3,6 +3,7 @@ import type { ModeColorSettings } from "./settings.js";
 const MODE_COLORS = {
   insert: "borderMuted",
   normal: "borderAccent",
+  visual: "customMessageLabel",
   ex: "warning",
 } as const;
 const TOKEN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -17,6 +18,7 @@ export function resolveModeColors(
   return {
     insert: colors?.insert ?? MODE_COLORS.insert,
     normal: colors?.normal ?? MODE_COLORS.normal,
+    visual: colors?.visual ?? MODE_COLORS.visual,
     ex: colors?.ex ?? MODE_COLORS.ex,
   };
 }
@@ -48,6 +50,7 @@ export function buildModeColorizers(
   return {
     insert: colorizer("insert"),
     normal: colorizer("normal"),
+    visual: colorizer("visual"),
     ex: colorizer("ex"),
   };
 }
