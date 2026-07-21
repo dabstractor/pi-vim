@@ -2053,8 +2053,19 @@ export class ModalEditor extends CustomEditor {
         this.applyVisualOperator("c", true);
         return true;
       default:
-        if (VISUAL_IGNORED_KEYS.has(data)) return true;
-        return matchesKey(data, "ctrl+r") || matchesKey(data, "ctrl+_");
+        if (
+          VISUAL_IGNORED_KEYS.has(data) ||
+          matchesKey(data, "ctrl+r") ||
+          matchesKey(data, "ctrl+_")
+        ) {
+          // Swallowed keys are inert in visual mode. Drop any pending count so
+          // it cannot leak into the next motion: `v2pld` must extend by one and
+          // delete one char, not swallow `p` yet still carry the 2 into `l`.
+          this.prefixCount = "";
+          this.operatorCount = "";
+          return true;
+        }
+        return false;
     }
   }
 

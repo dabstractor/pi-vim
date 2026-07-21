@@ -8579,6 +8579,29 @@ describe("visual mode — entering and leaving", () => {
     assert.equal(editor.getRegister(), "h");
   });
 
+  it("a count before a swallowed visual key does not leak into the next motion", () => {
+    // `p` is inert in visual mode (pi swallows it), so the pending count must
+    // be dropped: `v2pld` must behave exactly like `vld` — extend by one and
+    // delete two chars — not carry the 2 into `l` and over-delete.
+    const leaked = createEditorWithSpy("hello");
+    sendKeys(leaked.editor, ["v", "2", "p", "l", "d"]);
+
+    const baseline = createEditorWithSpy("hello");
+    sendKeys(baseline.editor, ["v", "l", "d"]);
+
+    assert.equal(leaked.editor.getText(), baseline.editor.getText());
+    assert.equal(leaked.editor.getText(), "llo");
+    assert.equal(leaked.editor.getRegister(), "he");
+  });
+
+  it("a count before a swallowed ctrl+r in visual mode does not leak", () => {
+    const CTRL_R = "\x12";
+    const leaked = createEditorWithSpy("hello");
+    sendKeys(leaked.editor, ["v", "2", CTRL_R, "l", "d"]);
+    assert.equal(leaked.editor.getText(), "llo");
+    assert.equal(leaked.editor.getRegister(), "he");
+  });
+
   it("Escape cancels a pending char motion but stays in visual mode", () => {
     const { editor } = createEditorWithSpy("hello");
     sendKeys(editor, ["v", "f", "\x1b"]);
