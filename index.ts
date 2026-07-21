@@ -2528,6 +2528,12 @@ export class ModalEditor extends CustomEditor {
       const currentLine = state.cursorLine ?? 0;
       let joinPoint = state.cursorCol ?? 0;
 
+      if (this.replayingRepeat && currentLine >= state.lines.length - 1) {
+        state.cursorCol = 0;
+        editor.preferredVisualCol = 0;
+        return;
+      }
+
       for (let i = 0; i < steps; i++) {
         if (currentLine >= state.lines.length - 1) break;
 

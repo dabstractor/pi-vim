@@ -134,6 +134,11 @@ const DOT_REPEAT_FINAL_STATE_CASES: NvimParityCase[] = [
     keys: ["2", "J", "3", "."],
   },
   {
+    name: ". resets the cursor when a counted join replay is exhausted",
+    initial: { text: "a\nb\nc", cursor: { line: 0, col: 0 } },
+    keys: ["3", "J", "."],
+  },
+  {
     name: ". repeats replace character",
     initial: { text: "abc", cursor: { line: 0, col: 0 }, register: "keep" },
     keys: ["r", "Z", "l", "."],

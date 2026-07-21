@@ -129,9 +129,13 @@ const THRESHOLDS = {
   // measured packed 46432 B, unpacked 192572 B. The packed budget still fits;
   // unpacked is bumped 192000 -> 193300, leaving ~728 B headroom. Files stay at
   // 17.
+  //
+  // Exhausted counted-join replay cursor parity: measured packed 46598 B and
+  // unpacked 193368 B. The packed budget still fits; unpacked is bumped 193300
+  // -> 193700, leaving ~332 B headroom. Files stay at 17.
   maxFiles: 17,
   maxSize: 46600,
-  maxUnpackedSize: 193300,
+  maxUnpackedSize: 193700,
 } as const;
 
 function compareStrings(a: string, b: string): number {
