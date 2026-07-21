@@ -19,6 +19,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
+import { extractPackResult } from "./pack-json.js";
 
 const REPO_ROOT = process.cwd();
 const DOC_PATH = path.join("doc", "dev", "scoreboard.md");
@@ -313,11 +314,12 @@ function runPackDryRun(): PackFootprint {
   }
 
   const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed) || !isObject(parsed[0])) {
-    fail("npm pack --dry-run --json returned an unexpected shape");
+  let first: Record<string, unknown>;
+  try {
+    first = extractPackResult(parsed);
+  } catch (error) {
+    fail(formatError(error));
   }
-
-  const first = parsed[0];
   const files = first.files;
   const size = first.size;
   const unpackedSize = first.unpackedSize;

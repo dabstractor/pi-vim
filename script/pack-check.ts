@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { posix } from "node:path";
+import { extractPackResult } from "./pack-json.js";
 
 type PackFile = {
   path: string;
@@ -148,43 +149,9 @@ function compareStrings(a: string, b: string): number {
   return 0;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-// `npm pack --json` changed its top-level shape across major versions.
-// Legacy npm (< 12) prints an array of pack-result objects; npm >= 12 prints
-// an object keyed by package name whose values are those same result objects.
-// Accept both and normalize to the first result so the gate stays portable
-// across whichever npm the caller happens to run.
-function extractPackResult(parsed: unknown): Record<string, unknown> {
-  let candidates: unknown[];
-
-  if (Array.isArray(parsed)) {
-    candidates = parsed;
-  } else if (isObject(parsed)) {
-    candidates = Object.values(parsed);
-  } else {
-    throw new Error(
-      "npm pack --dry-run --json returned an unrecognized JSON shape (expected an array or an object keyed by package name)",
-    );
-  }
-
-  if (candidates.length === 0) {
-    throw new Error("npm pack --dry-run --json returned no pack results");
-  }
-
-  const firstResult = candidates[0];
-  if (!isObject(firstResult)) {
-    throw new Error("npm pack --dry-run --json first result is not an object");
-  }
-
-  return firstResult;
 }
 
 function runPackDryRun(): PackResult {
@@ -231,7 +198,9 @@ function runPackDryRun(): PackResult {
 
   const packFiles = files.map((entry, index) => {
     if (
-      !isObject(entry) ||
+      typeof entry !== "object" ||
+      entry === null ||
+      !("path" in entry) ||
       typeof entry.path !== "string" ||
       entry.path.length === 0
     ) {
