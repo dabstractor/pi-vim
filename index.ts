@@ -411,6 +411,7 @@ export class ModalEditor extends CustomEditor {
     // implicit insert, not a continuation of a host-tainted one.
     this.implicitInsertSuppressed = false;
     super.setText(text);
+    this.refreshPendingDispatchRestore(true);
   }
 
   override insertTextAtCursor(text: string): void {
@@ -419,6 +420,26 @@ export class ModalEditor extends CustomEditor {
     // ours to replay, and neither is any typing that continues around it.
     this.implicitInsertSuppressed = true;
     super.insertTextAtCursor(text);
+    this.refreshPendingDispatchRestore(true);
+  }
+
+  /**
+   * While an async EX dispatch is pending, the prompt the settle handler will
+   * reapply must track the *latest* buffer, not only what `handleInput`
+   * produced. A wrapper mutating the prompt out of band through the public
+   * setters refreshes the snapshot here, so a late-settling dispatch that
+   * clears the prompt restores the wrapper's newer text instead of the stale
+   * pre-dispatch state.
+   *
+   * A public setter that empties the buffer is skipped: that is the async
+   * clear the restore exists to compensate for (or a wrapper clearing), so
+   * capturing it would defeat the reapply. `handleInput` still refreshes on any
+   * result, including an intentional emptying edit like `dd`.
+   */
+  private refreshPendingDispatchRestore(fromPublicSetter = false): void {
+    if (this.pendingAsyncDispatches === 0) return;
+    if (fromPublicSetter && this.getText() === "") return;
+    this.restoreLatestDispatchStateFn = this.captureDispatchState().restore;
   }
 
   private captureSnapshot(): EditorSnapshot {
@@ -1060,9 +1081,7 @@ export class ModalEditor extends CustomEditor {
     try {
       this.handleInputCore(data);
     } finally {
-      if (this.pendingAsyncDispatches > 0) {
-        this.restoreLatestDispatchStateFn = this.captureDispatchState().restore;
-      }
+      this.refreshPendingDispatchRestore();
     }
   }
 

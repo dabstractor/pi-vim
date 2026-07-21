@@ -2058,6 +2058,58 @@ describe("ex pi-command bridge", () => {
     assert.equal(session.editor.getText(), "ello");
   });
 
+  it("preserves a wrapper's out-of-band setText across a delayed async clear", async () => {
+    // A wrapper replaces the prompt through the public setter while the
+    // dispatch is still pending, with no handleInput after it to refresh the
+    // restore seam. The delayed clear must reapply the wrapper's newer prompt,
+    // not overwrite it with the stale pre-dispatch text.
+    const session = createBridgeSession("stale prompt");
+    let finishDispatch: (() => void) | undefined;
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatch = () => {
+            session.editor.setText("");
+            resolve();
+          };
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    session.editor.setText("wrapper prompt");
+    assert.ok(finishDispatch);
+    finishDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "wrapper prompt");
+  });
+
+  it("preserves a wrapper's out-of-band insert across a delayed async clear", async () => {
+    const session = createBridgeSession("stale");
+    let finishDispatch: (() => void) | undefined;
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatch = () => {
+            session.editor.setText("");
+            resolve();
+          };
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    session.editor.insertTextAtCursor("!");
+    const afterInsert = session.editor.getText();
+    assert.ok(finishDispatch);
+    finishDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    // The insert survives; the stale pre-dispatch prompt does not clobber it.
+    assert.equal(session.editor.getText(), afterInsert);
+    assert.notEqual(session.editor.getText(), "stale");
+    assert.ok(session.editor.getText().includes("!"));
+  });
+
   it("keeps edits when an async dispatch settles without clearing", async () => {
     const session = createBridgeSession("hello");
     let finishDispatch: (() => void) | undefined;
