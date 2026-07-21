@@ -6,7 +6,7 @@ For every new or changed Vim-like feature, add curated nvim parity coverage in `
 
 Known nvim parity gaps may live as skipped tests. Apply the boy scout principle: when a branch touches the relevant behavior, unskip and fix nearby skipped parity cases alongside the branch's own change, or document why the gap remains out of scope. Do not batch unrelated parity fixes into a conflict-heavy branch.
 
-Behavior the harnesses cannot reach — the terminal, Pi's own prompt widgets, a real paste, a wrapping extension — is checked by hand. Keep `doc/dev/manual-qa.md` in step with the feature: a branch that adds such a surface adds its cases there.
+Behavior the harnesses cannot reach — the terminal, Pi's own prompt widgets, a real paste, a wrapping extension — is checked by hand. A branch that adds or changes such a TTY-only surface updates the maintainer QA runbook (kept outside the published tree) and adds or adjusts the corresponding simulated tests in-repo.
 
 `doc/dev/scoreboard.md` is generated, never hand-written: it reports parity, unit, performance, and package-footprint numbers straight from the harnesses. Run `npm run scoreboard -- --write` after a branch changes parity coverage, adds a benchmark, or moves a `pack:check` budget.
 
