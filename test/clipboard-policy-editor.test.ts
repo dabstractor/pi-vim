@@ -294,7 +294,7 @@ describe("clipboard mirror policy", () => {
     }
   });
 
-  it("an empty register write is not pinned to the register after a failed mirror write", async () => {
+  it("a no-op delete preserves register preference after a failed mirror", async () => {
     const { editor } = createEditorWithSpy("ab");
     try {
       editor.setClipboardFn(async () => {
@@ -308,8 +308,8 @@ describe("clipboard mirror policy", () => {
       setInternalCursor(editor, 2);
       sendKeys(editor, ["D", "p"]);
 
-      assert.equal(editor.getText(), "abSYS");
-      assert.equal(editor.getRegister(), "");
+      assert.equal(editor.getText(), "ab\nab");
+      assert.equal(editor.getRegister(), "ab\n");
     } finally {
       editor.setClipboardFn(() => {});
     }

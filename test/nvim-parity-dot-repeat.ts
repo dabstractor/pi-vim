@@ -54,6 +54,16 @@ const DOT_REPEAT_FINAL_STATE_CASES: NvimParityCase[] = [
     keys: ["d", "$", "j", "0", "2", "."],
   },
   {
+    name: "a no-op d$ repeat preserves the unnamed register",
+    initial: { text: "abc", cursor: { line: 0, col: 0 } },
+    keys: ["d", "$", "."],
+  },
+  {
+    name: "a d$ repeat with text updates the unnamed register",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
+    keys: ["d", "$", "j", "."],
+  },
+  {
     name: "count before . keeps d$ linewise register before EOF",
     initial: {
       text: "abc def\nghi jkl\nmno pqr\nstu vwx",

@@ -133,8 +133,12 @@ const THRESHOLDS = {
   // Exhausted counted-join replay cursor parity: measured packed 46598 B and
   // unpacked 193368 B. The packed budget still fits; unpacked is bumped 193300
   // -> 193700, leaving ~332 B headroom. Files stay at 17.
+  //
+  // No-op line-end delete register parity: measured packed 46604 B and unpacked
+  // 193388 B. The unpacked budget still fits; packed is bumped 46600 -> 46900,
+  // leaving ~296 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 46600,
+  maxSize: 46900,
   maxUnpackedSize: 193700,
 } as const;
 

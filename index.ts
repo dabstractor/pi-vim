@@ -2993,7 +2993,7 @@ export class ModalEditor extends CustomEditor {
     const deleted =
       col < line.length ? line.slice(col) : hasNextLine ? "\n" : "";
 
-    this.writeToRegister(deleted);
+    if (deleted !== "") this.writeToRegister(deleted);
     super.handleInput(CTRL_K);
   }
 
