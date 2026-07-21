@@ -152,9 +152,17 @@ const THRESHOLDS = {
   // rows/precedence documenting it. Measured packed 48014 B, unpacked 197664 B.
   // Budgets bumped 47900 -> 48400 and 196600 -> 198000, leaving ~386 B / ~336 B
   // headroom. Files stay at 17.
+  //
+  // Wave-2 review fixes: index.ts excludes the Kitty CSI-u Enter (`\x1b[13u`)
+  // from implicit-insert dot-repeat so a replay cannot re-submit, refreshes the
+  // pending async-dispatch restore snapshot on out-of-band public setters, and
+  // drops a leaked count on swallowed visual-mode keys; plus README
+  // trust-boundary, paste-policy, and getMode() corrections. Measured packed
+  // 48885 B, unpacked 200117 B. Budgets bumped 48400 -> 49400 and 198000 ->
+  // 200600, leaving ~515 B / ~483 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 48400,
-  maxUnpackedSize: 198000,
+  maxSize: 49400,
+  maxUnpackedSize: 200600,
 } as const;
 
 function compareStrings(a: string, b: string): number {
