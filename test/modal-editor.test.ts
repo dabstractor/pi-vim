@@ -1459,6 +1459,84 @@ describe("ex mini-mode", () => {
     assert.deepEqual(session.notifications, []);
   });
 
+  it("does not submit trailing enter bytes from a paste chunk", () => {
+    const session = createEditorWithSpy("");
+    const dispatched: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(["tree"]));
+    session.editor.setRunCommandFn((commandLine) => {
+      dispatched.push(commandLine);
+    });
+
+    sendKeys(session.editor, [":", "\x1b[200~tree\x1b[201~\r"]);
+
+    assert.deepEqual(dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :tree_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.deepEqual(dispatched, ["/tree"]);
+  });
+
+  it("does not submit enter bytes after a split paste terminator", () => {
+    const session = createEditorWithSpy("");
+    const dispatched: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(["tree"]));
+    session.editor.setRunCommandFn((commandLine) => {
+      dispatched.push(commandLine);
+    });
+
+    sendKeys(session.editor, [":", "\x1b[200~tree", "\x1b", "[201~\r"]);
+
+    assert.deepEqual(dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :tree_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.deepEqual(dispatched, ["/tree"]);
+  });
+
+  it("keeps discarding when a discarded tail starts another paste", () => {
+    const session = createEditorWithSpy("");
+    const dispatched: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(["tree", "treeevil"]));
+    session.editor.setRunCommandFn((commandLine) => {
+      dispatched.push(commandLine);
+    });
+
+    sendKeys(session.editor, [
+      ":",
+      "\x1b[200~tree\x1b[201~\x1b[200~",
+      "evil\r",
+      "\x1b[201~",
+    ]);
+
+    assert.deepEqual(dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :tree_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.deepEqual(dispatched, ["/tree"]);
+  });
+
+  it("keeps discarding across a split nested paste start", () => {
+    const session = createEditorWithSpy("");
+    const dispatched: string[] = [];
+    session.editor.setCommandNamesFn(() => new Set(["tree", "tree[200~evil"]));
+    session.editor.setRunCommandFn((commandLine) => {
+      dispatched.push(commandLine);
+    });
+
+    sendKeys(session.editor, [
+      ":",
+      "\x1b[200~tree\x1b[201~\x1b",
+      "[200~evil\r",
+      "\x1b[201~",
+    ]);
+
+    assert.deepEqual(dispatched, []);
+    assert.ok(session.editor.render(80).at(-1)?.endsWith(" EX :tree_ "));
+
+    sendKeys(session.editor, ["\r"]);
+    assert.deepEqual(dispatched, ["/tree"]);
+  });
+
   it("split bracketed paste payload is accepted in ex mini-mode", () => {
     const session = createEditorWithSpy("hello");
 

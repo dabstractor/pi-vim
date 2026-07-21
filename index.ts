@@ -868,6 +868,23 @@ export class ModalEditor extends CustomEditor {
     this.discardingPasteAfterNewlineInExCommand = false;
   }
 
+  private retainDiscardedExPasteTailState(tail: string): void {
+    const lastStart = tail.lastIndexOf(BRACKETED_PASTE_START);
+    const lastEnd = tail.lastIndexOf(BRACKETED_PASTE_END);
+    let endsWithStartPrefix = false;
+    for (let length = 1; length < BRACKETED_PASTE_START.length; length++) {
+      if (tail.endsWith(BRACKETED_PASTE_START.slice(0, length))) {
+        endsWithStartPrefix = true;
+        break;
+      }
+    }
+    if (lastStart <= lastEnd && !endsWithStartPrefix) return;
+
+    this.acceptingBracketedPasteInExCommand = true;
+    this.pendingEscWhileAcceptingBracketedPasteInExCommand = false;
+    this.discardingPasteAfterNewlineInExCommand = true;
+  }
+
   /**
    * First-line-wait: a pasted newline never submits. The payload up to the
    * first newline becomes the pending command; the rest of that paste is
@@ -891,12 +908,10 @@ export class ModalEditor extends CustomEditor {
       if (this.acceptingBracketedPasteInExCommand) {
         if (this.pendingEscWhileAcceptingBracketedPasteInExCommand) {
           if (chunk.startsWith(BRACKETED_PASTE_END_TAIL)) {
+            const tail = chunk.slice(BRACKETED_PASTE_END_TAIL.length);
             this.endBracketedPasteInExCommand();
-            chunk = chunk.slice(BRACKETED_PASTE_END_TAIL.length);
-            if (chunk.length === 0) {
-              return normalized.length > 0 ? normalized : null;
-            }
-            continue;
+            this.retainDiscardedExPasteTailState(tail);
+            return null;
           }
 
           normalized += this.takePastedExCommandText("\x1b");
@@ -906,12 +921,10 @@ export class ModalEditor extends CustomEditor {
         const end = chunk.indexOf(BRACKETED_PASTE_END);
         if (end !== -1) {
           normalized += this.takePastedExCommandText(chunk.slice(0, end));
+          const tail = chunk.slice(end + BRACKETED_PASTE_END.length);
           this.endBracketedPasteInExCommand();
-          chunk = chunk.slice(end + BRACKETED_PASTE_END.length);
-          if (chunk.length === 0) {
-            return normalized.length > 0 ? normalized : null;
-          }
-          continue;
+          this.retainDiscardedExPasteTailState(tail);
+          return normalized.length > 0 ? normalized : null;
         }
 
         if (isEscapeLikeInput(chunk)) {
