@@ -39,7 +39,7 @@ All keys are optional; omitting `piVim` is equivalent. Project overrides global 
 
 `clipboardMirror`: `all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`.
 
-`exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [ex mini-mode](#ex-mini-mode)); `false` restores a quit-only ex line. `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. Both are read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
+`exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [ex mini-mode](#ex-mini-mode)); `false` restores a quit-only ex line. `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use. `copyInputToClipboard` is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
 
 `syncBorderColorWithMode`: `false` keeps Pi thinking border; `true` follows mode colors.
 
@@ -69,7 +69,7 @@ Usual/safest: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `err
 
 ## wrapping pi-vim
 
-Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). Inverse order, insert delegates, and generic composition are unsupported.
+Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). `getMode()` returns `normal`, `insert`, `visual`, or `visual-line`, so a wrapper can tell the two visual sub-modes apart. Inverse order, insert delegates, and generic composition are unsupported.
 
 Smoke:
 
