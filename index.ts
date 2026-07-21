@@ -183,6 +183,7 @@ const EX_BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
   "resume",
   "reload",
   "quit",
+  "trust",
 ]);
 
 type EditorSnapshot = {

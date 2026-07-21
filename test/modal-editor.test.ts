@@ -1826,6 +1826,20 @@ describe("ex pi-command bridge", () => {
     assert.deepEqual(session.notifications, []);
   });
 
+  it("dispatches trust from the builtin command mirror", () => {
+    const session = createEditorWithSpy("");
+    const submitted: string[] = [];
+    session.editor.onSubmit = (text) => {
+      submitted.push(text);
+      session.editor.setText("");
+    };
+
+    runEx(session.editor, "trust");
+
+    assert.deepEqual(submitted, ["/trust"]);
+    assert.deepEqual(session.notifications, []);
+  });
+
   it("reserves future vim ex names instead of dispatching them", () => {
     for (const name of ["s", "g", "v", "d", "m", "t", "co", "j", "w", "r"]) {
       const session = createBridgeSession("", [name]);
