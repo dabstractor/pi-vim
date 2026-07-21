@@ -183,12 +183,13 @@ const THRESHOLDS = {
   // buildOffBorderColor + isNeutralBorder, index.ts tracks the host-assigned
   // border base and resolves the token-based thinking-color precedence
   // (borderMuted > thinking > accent; the label inherits the thinking color),
-  // and the README documents the mode plus its precedence rule. Measured on
-  // its original baseline: packed 51382 B, unpacked 207483 B. Files stay
-  // at 17.
+  // and the README documents the mode plus its precedence rule. Rebased on
+  // top of the undo-scope and gM features, the stacked package measures
+  // packed 53459 B, unpacked 213919 B. Budgets bumped 51000 -> 54000 and
+  // 207100 -> 214500, leaving ~541 B / ~581 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 51000,
-  maxUnpackedSize: 207100,
+  maxSize: 54000,
+  maxUnpackedSize: 214500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
