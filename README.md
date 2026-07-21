@@ -376,6 +376,8 @@ Put reads the OS clipboard first unless the last local register write was not mi
 | `.` | Repeat the last repeatable normal-mode edit/change (for example `x`, `dw`, `cw...Esc`, `p`, `J`, insert entries like `i...Esc`) |
 | `{count}.` | Repeat the last change with `{count}` replacing the stored command count |
 
+One `u` undoes one whole vim change and one `<C-r>` redoes one, matching Neovim: a complete insert session (single- or multi-line, count-prefixed included) collapses to a single unit, and so does each change command (`cw`, `3dw`, `viwd`, `p`, `o`, `r`, …). A `.` dot-repeat is its own unit, separate from the change it repeats, and `u`/`<C-r>` are exact inverses. Count-insert *repeat* (`3i…<Esc>` producing `hihihi`) is out of scope; whatever `3i…<Esc>` types today is still one undo unit.
+
 Repeat tracks changes only; motions and yanks do not replace the previous repeatable change. Plain `.` preserves the original command count; `{count}.` uses the new count for that replay.
 
 Typing done in an implicit insert session is repeatable too: the prompt opens in insert mode and re-enters it after a submit, so the first keystroke records an `i…<Esc>` change even though no `i` was pressed. A submit (`<Enter>`) is never part of the recording, so a later `.` re-types the run but never resubmits.
@@ -428,7 +430,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 | `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
-| Undo / redo | Delegates undo to readline; normal-mode `<C-r>` redo is supported | Full per-change undo tree |
+| Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
 | Visual selection rendering | No highlight; only the footer label and the block cursor mark the selection | Selection is highlighted |
 | Visual line-wise delete | Leaves the cursor at column 0, like `dd` does today | Preserves the cursor column |
@@ -463,6 +465,8 @@ Explicitly deferred:
 - Replace mode (`R`) — only `r{char}` is supported
 - Count prefix beyond currently supported motions, including `{count}%` percent-of-file jumps
 - No insert-mode `<C-r>` expansion, no cross-session redo persistence
+- No undo **tree** or time-travel (`g+`, `g-`, `:earlier`, `:later`); pi-vim keeps a linear undo/redo list
+- No count-insert **repeat** (`3i…<Esc>` producing `hihihi`); a count-prefixed insert still undoes as one unit
 - No upstream `pi-tui` redo prerequisite
 - Window / tab / buffer management, plugin ecosystem compatibility
 
