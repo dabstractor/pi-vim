@@ -8,7 +8,9 @@
       "biome.json",
       "package.json",
       "tsconfig.json",
-      "eslint.config.mjs"
+      "eslint.config.mjs",
+      "!.tree",
+      "!node_modules"
     ],
     "ignoreUnknown": true
   },
