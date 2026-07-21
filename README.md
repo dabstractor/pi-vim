@@ -184,7 +184,7 @@ Quit flows, plus a bridge that runs Pi slash commands from the ex line.
 | reserved `:{cmd}` | Show a reserved-command notification; never dispatched |
 | unsupported `:{cmd}` | Show warning notification; no quit, no dispatch |
 
-Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. Only a typed `Enter` submits an ex command: pasting into the ex line keeps the text up to the first newline and discards the rest of the paste, so pasted content can never execute (see `doc/dev/ex-paste-newline-policy.md`).
+Quit commands match the exact forms above only; vim prefix abbreviations such as `:quita` are unsupported. A paste never auto-submits: only a typed `Enter` submits an ex command. Pasting into the ex line keeps the paste up to its first newline, holds that first line, and discards the rest, so pasted content can never execute until you type Enter yourself.
 
 ##### pi-command bridge
 
