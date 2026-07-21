@@ -138,9 +138,16 @@ const THRESHOLDS = {
   // No-op line-end delete register parity: measured packed 46604 B and unpacked
   // 193388 B. The unpacked budget still fits; packed is bumped 46600 -> 46900,
   // leaving ~296 B headroom. Files stay at 17.
+  //
+  // Implicit-insert dot-repeat: index.ts synthesizes an `i` recording on the
+  // first keystroke of a startup/post-submit implicit insert, and a
+  // suppression flag keeps a host-tainted insert session out of dot-repeat.
+  // Plus a README paragraph documenting the behavior. Measured packed 47580 B,
+  // unpacked 196332 B. Budgets bumped 46900 -> 47900 and 193700 -> 196600,
+  // leaving ~320 B / ~268 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 46900,
-  maxUnpackedSize: 193700,
+  maxSize: 47900,
+  maxUnpackedSize: 196600,
 } as const;
 
 function compareStrings(a: string, b: string): number {

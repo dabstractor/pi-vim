@@ -256,6 +256,7 @@ export class ModalEditor extends CustomEditor {
   private readonly redoStack: EditorSnapshot[] = [];
   private lastRepeatableCommand: RepeatableCommand | null = null;
   private repeatRecording: RepeatRecording | null = null;
+  private implicitInsertSuppressed: boolean = false;
   private replayingRepeat: boolean = false;
   private repeatReplayFailed: boolean = false;
   private bufferChangeVersion: number = 0;
@@ -389,6 +390,11 @@ export class ModalEditor extends CustomEditor {
   private setMode(mode: Mode = "insert"): void {
     const prev = this.mode;
     this.mode = mode;
+    // Leaving insert ends any host-tainted session, so the next implicit
+    // insert (post-submit or a re-entry) records normally again.
+    if (prev === "insert" && mode !== "insert") {
+      this.implicitInsertSuppressed = false;
+    }
     if (prev !== mode) {
       try {
         this.modeChangeFn(mode, prev);
@@ -401,11 +407,17 @@ export class ModalEditor extends CustomEditor {
   override setText(text: string): void {
     this.clearRedoStack();
     this.clearRepeatState();
+    // A full host buffer reset starts a fresh session: later typing is a new
+    // implicit insert, not a continuation of a host-tainted one.
+    this.implicitInsertSuppressed = false;
     super.setText(text);
   }
 
   override insertTextAtCursor(text: string): void {
     this.cancelRepeatableCommand();
+    // A host injection mid-insert taints the session: the injected text is not
+    // ours to replay, and neither is any typing that continues around it.
+    this.implicitInsertSuppressed = true;
     super.insertTextAtCursor(text);
   }
 
@@ -600,7 +612,27 @@ export class ModalEditor extends CustomEditor {
     if (this.mode === "insert") {
       if (this.shouldCancelInsertRepeatInput(key)) {
         this.clearRepeatState();
+        // Enter submits and opens a fresh prompt, so the next implicit insert
+        // is repeatable again. Tab-completion is a host edit inside the
+        // current session, so it taints the rest of that session — continued
+        // typing must not resurrect a recording.
+        this.implicitInsertSuppressed = key !== "\r";
         return;
+      }
+      // Implicit insert (startup / post-submit): the editor is already in
+      // insert mode with no recording open, so a vim `i`/`a`/… entry never
+      // ran to seed one. Synthesize an `i` entry on the first real keystroke
+      // so the typed run becomes dot-repeatable, exactly as if the user had
+      // pressed `i` in normal mode. Escape finalizes it as the last change;
+      // Enter and Tab-completion stay excluded via the cancel check above, so
+      // a later replay can never submit. A session tainted by a mid-insert
+      // host edit stays suppressed until Escape leaves insert mode.
+      if (
+        !this.repeatRecording &&
+        !this.implicitInsertSuppressed &&
+        !isEscapeLikeInput(key)
+      ) {
+        this.beginImplicitInsertRecording();
       }
       if (this.repeatRecording?.captureInsert) {
         this.repeatRecording.keys.push(key);
@@ -629,6 +661,22 @@ export class ModalEditor extends CustomEditor {
       countOverrideKeys: [key],
       startChangeVersion: this.bufferChangeVersion,
       captureInsert: false,
+      forceCommit: false,
+    };
+  }
+
+  /**
+   * Open a recording for an implicit insert session as if `i` had been pressed.
+   * `captureInsert` starts true so the triggering keystroke and everything up
+   * to Escape is captured; replaying the stored `["i", …, Esc]` re-enters
+   * insert mode and re-types the run without ever submitting.
+   */
+  private beginImplicitInsertRecording(): void {
+    this.repeatRecording = {
+      keys: ["i"],
+      countOverrideKeys: ["i"],
+      startChangeVersion: this.bufferChangeVersion,
+      captureInsert: true,
       forceCommit: false,
     };
   }

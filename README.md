@@ -376,6 +376,8 @@ Put reads the OS clipboard first unless the last local register write was not mi
 
 Repeat tracks changes only; motions and yanks do not replace the previous repeatable change. Plain `.` preserves the original command count; `{count}.` uses the new count for that replay.
 
+Typing done in an implicit insert session is repeatable too: the prompt opens in insert mode and re-enters it after a submit, so the first keystroke records an `i…<Esc>` change even though no `i` was pressed. A submit (`<Enter>`) is never part of the recording, so a later `.` re-types the run but never resubmits.
+
 ---
 
 ### visual mode

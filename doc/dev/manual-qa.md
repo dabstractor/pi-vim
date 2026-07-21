@@ -135,16 +135,17 @@ widgets, or a second extension in the process. Run this group first.
   TTY-only.
 - reset: `<Esc> gg dG`
 
-### A6 — submitting is not a repeatable command
+### A6 — a submit is excluded from repeat, post-submit typing is not
 
 - fresh session.
 - keys: press `<Esc>` then `i`, type `hi`, press `<Enter>`.
 - expect: `hi` is submitted to Pi, the prompt is empty, and the editor is
   still in insert mode.
-- keys: type `ok`, press `<Esc>`, then press `.`.
-- expect: the buffer reads `ok` and stays `ok`. `.` is a no-op: the submit
-  cancelled the insert recording, so there is no recorded change to replay,
-  and nothing is submitted a second time.
+- keys: type `ok`, press `<Esc>`, press `0`, then press `.`.
+- expect: the buffer reads `okok`. Typing after the submit runs in an implicit
+  insert session, so it is dot-repeatable and `.` re-inserts `ok` at the line
+  start. The `<Enter>` submit itself stays excluded from the recording, so
+  nothing is submitted a second time.
 - reset: `<Esc> gg dG`
 
 ### A7 — a wrapping extension's text injection cancels the recording
@@ -164,13 +165,18 @@ widgets, or a second extension in the process. Run this group first.
   directly beside its siblings, which is not the case when the repo is
   checked out in a git worktree, so give the checkout path explicitly.
   `pi-vim` must load first; see the wrapping section of `README.md`.
-- seed: `i` type `"alpha beta"` `<Esc>` `gg 0`
+- seed: press `<Esc>`, then `i` type `"alpha beta"` `<Esc>` `gg 0`
 - keys: press `c` `w` (insert mode, `alpha` gone), then paste or drag an
   image path so the wrapper injects its `[Image #1] ` placeholder. Press
   `<Esc>`, then `w`, then `.`.
-- expect: the placeholder appears. `.` changes nothing — the host injected
-  text mid-change, so the recording is dropped rather than replaying a change
-  pi-vim did not author.
+- expect: the placeholder appears exactly once. The host injected text
+  mid-change, so the interrupted `cw` recording is dropped and `.` never
+  re-runs the host-authored change. `.` falls back to the last completed
+  change — here the seed `i…<Esc>` insert — so it re-inserts `alpha beta`;
+  the placeholder is never replayed.
+- notes: if you keep typing after the injection and before `<Esc>`, that
+  typing is not repeatable either — a host-tainted insert session stays out
+  of dot-repeat until `<Esc>` leaves insert mode.
 - reset: `<Esc> gg dG`, then quit and relaunch the single-extension session.
 
 ### A8 — a pasted newline never submits an ex command
@@ -389,6 +395,16 @@ than what a buffer assertion shows. Check it by eye.
 - expect: line 2 is unchanged. There is no comma to change to, so the replay
   aborts as a whole: no stray `dd` is inserted, no partial delete lands, and
   the editor stays in normal mode (no `<Esc>` leaks into the buffer).
+- reset: `<Esc> gg dG`
+
+### D13 — the startup implicit insert is repeatable
+
+- fresh session: the prompt opens in insert mode with no `i` pressed.
+- keys: type `hi`, press `<Esc>`, press `0`, then press `.`.
+- expect: the buffer reads `hihi`. The first keystroke of the implicit insert
+  opens a recording as if `i` had been pressed, so `<Esc>` finalizes it as the
+  last change and `.` re-inserts `hi`. `{count}.` (for example `2 .`) repeats
+  it that many times, exactly like `i…<Esc>`.
 - reset: `<Esc> gg dG`
 
 ---
@@ -708,7 +724,8 @@ The dangerous version of A8, now that the ex line can run real commands.
 | cursor shape / software cursor | `test/cursor-shape.test.ts` (strings only) | A3 |
 | paste cancels a pending command | `test/dot-repeat-review.test.ts` (simulated) | A4 |
 | autocomplete cancels a recording | `test/dot-repeat-review.test.ts` (simulated) | A5 |
-| submit is not repeatable | `test/dot-repeat-review.test.ts` | A6 |
+| submit excluded from repeat; post-submit typing repeatable | `test/dot-repeat-review.test.ts` | A6 |
+| startup implicit insert is repeatable | `test/dot-repeat-review.test.ts` | D13 |
 | host text injection cancels | `test/dot-repeat-review.test.ts` (simulated) | A7 |
 | pasted newline never submits an ex command | `test/modal-editor.test.ts` (simulated markers) | A8 |
 | ex name resolution (quit / reserved / known / unknown) | `test/modal-editor.test.ts` | H5, H6 |

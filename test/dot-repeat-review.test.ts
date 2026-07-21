@@ -9,6 +9,7 @@ import {
   stubTheme,
   stubTui,
 } from "./harness.js";
+import { type NvimParityCase, runPiParityCase } from "./nvim-oracle.js";
 
 const ESC = "\x1b";
 const CTRL_R = "\x12";
@@ -102,7 +103,7 @@ function setRawEditorText(editor: ModalEditor, text: string): void {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("dot repeat review regressions", () => {
-  it("does not record insert-mode submit as repeatable input", () => {
+  it("repeats post-submit implicit insert without re-submitting", () => {
     const { editor, submits } = makeSubmitEditor();
 
     editor.handleInput(ESC);
@@ -111,10 +112,13 @@ describe("dot repeat review regressions", () => {
     assert.equal(editor.getText(), "");
     assert.equal(editor.getMode(), "insert");
 
-    sendKeys(editor, ["o", "k", ESC, "."]);
+    // Post-submit typing runs in an implicit insert session, so it is now
+    // dot-repeatable. The submit itself stays excluded, so replaying the
+    // recorded insert re-types the text without ever submitting again.
+    sendKeys(editor, ["o", "k", ESC, "0", "."]);
 
-    assert.deepEqual(submits, ["hi"]);
-    assert.equal(editor.getText(), "ok");
+    assert.deepEqual(submits, ["hi"]); // no second submit
+    assert.equal(editor.getText(), "okok"); // `.` re-inserted "ok"
     assert.equal(editor.getMode(), "normal");
   });
 
@@ -181,14 +185,17 @@ describe("dot repeat review regressions", () => {
     }
   });
 
-  it("invalidates repeat state across host setText resets", () => {
+  it("invalidates the prior recording across host setText resets", () => {
     const { editor } = createEditorWithSpy("");
 
     sendKeys(editor, ["i", "o", "l", "d"]);
     editor.setText("");
-    sendKeys(editor, ["n", "e", "w", ESC, "."]);
+    // setText invalidates the in-flight `old` insert, so `.` never re-inserts
+    // it; the post-reset implicit insert is independently repeatable instead.
+    sendKeys(editor, ["n", "e", "w", ESC, "0", "."]);
 
-    assert.equal(editor.getText(), "new");
+    assert.equal(editor.getText(), "newnew");
+    assert.ok(!editor.getText().includes("old"));
   });
 
   it("records identity text changes as the latest repeatable command", () => {
@@ -216,16 +223,41 @@ describe("dot repeat review regressions", () => {
 
   it("cancels repeat recording for programmatic insertTextAtCursor changes", () => {
     const { editor } = createMultiLineEditor("alpha beta");
-    const beforeRepeat = () => editor.getText();
 
     sendKeys(editor, ["c", "w"]);
     editor.insertTextAtCursor("[Image #1] ");
-    sendKeys(editor, [ESC, "w"]);
+    sendKeys(editor, [ESC, "0", "."]);
 
-    const before = beforeRepeat();
-    sendKeys(editor, ["."]);
+    // The host injection cancelled the in-flight `cw` recording, so `.` never
+    // re-runs the change-word + placeholder injection (which would delete a
+    // word and duplicate the placeholder). It falls back to the seed implicit
+    // insert, leaving exactly one placeholder in the buffer.
+    const text = editor.getText();
+    assert.equal(text.match(/\[Image #1\]/g)?.length, 1);
+    assert.ok(text.startsWith("alpha beta"));
+  });
 
-    assert.equal(editor.getText(), before);
+  it("does not resurrect repeat after a mid-insert host injection", () => {
+    const { editor } = createMultiLineEditor("");
+
+    sendKeys(editor, ["i", "a"]);
+    editor.insertTextAtCursor("[H]");
+    // The injection taints the session, so the continued `b` does not open a
+    // fresh implicit recording. With no earlier completed change, `.` is inert.
+    sendKeys(editor, ["b", ESC, "0", "."]);
+
+    assert.equal(editor.getText(), "a[H]b");
+  });
+
+  it("clears the host taint on setText so later typing repeats again", () => {
+    const { editor } = createMultiLineEditor("");
+
+    sendKeys(editor, ["i", "a"]);
+    editor.insertTextAtCursor("[H]"); // taints the session
+    editor.setText(""); // full host reset clears the taint
+    sendKeys(editor, ["z", ESC, "0", "."]);
+
+    assert.equal(editor.getText(), "zz");
   });
 
   it("cancels repeat recording for async autocomplete Tab acceptance", async () => {
@@ -270,4 +302,118 @@ describe("dot repeat review regressions", () => {
 
     assert.equal(editor.getText(), "");
   });
+});
+
+describe("implicit insert dot repeat", () => {
+  function makeBareEditor(): ModalEditor {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+    editor.setClipboardFn(() => undefined);
+    editor.setClipboardReadFn(() => null);
+    return editor;
+  }
+
+  it("repeats typing done in the startup implicit insert", () => {
+    // A fresh editor opens directly in insert mode with no vim `i` entry, so
+    // the first keystroke synthesizes one and the run becomes repeatable.
+    const editor = makeBareEditor();
+
+    sendKeys(editor, ["h", "i", ESC]);
+    assert.equal(editor.getText(), "hi");
+    assert.equal(editor.getMode(), "normal");
+
+    sendKeys(editor, ["0", "."]);
+    assert.equal(editor.getText(), "hihi");
+  });
+
+  it("count before . repeats the implicit insert count times", () => {
+    const editor = makeBareEditor();
+
+    sendKeys(editor, ["X", ESC, "0", "3", "."]);
+
+    assert.equal(editor.getText(), "XXXX");
+  });
+
+  it("records nothing when an empty implicit insert is escaped", () => {
+    const editor = makeBareEditor();
+
+    sendKeys(editor, [ESC, "."]);
+
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("repeats an implicit insert containing a newline", () => {
+    const editor = makeBareEditor();
+
+    // `\n` inserts a line inside the prompt (only `\r` submits), so a
+    // multi-line implicit insert replays as a multi-line change.
+    sendKeys(editor, ["a", "\n", "b", ESC]);
+    assert.equal(editor.getText(), "a\nb");
+
+    sendKeys(editor, ["."]);
+    assert.equal(editor.getText(), "a\na\nbb");
+  });
+});
+
+// Parity-style check: an implicit insert must dot-repeat byte-identically to
+// pressing `i` in normal mode — that is the whole contract of the synthetic
+// entry. The nvim oracle drives its own insert seed with `startinsert`, whose
+// feedkeys interaction mis-consumes the first keys, so it cannot faithfully
+// replay an implicit session. Instead we anchor to the explicit `i` form,
+// which the nvim-parity suite already validates against real nvim, and assert
+// the implicit variant lands on the same final state.
+describe("implicit insert dot repeat parity", () => {
+  const PARITY_PAYLOADS: {
+    name: string;
+    text: string;
+    cursor: { line: number; col: number };
+    insert: string[];
+    tail: string[];
+  }[] = [
+    {
+      name: "typed run replayed at line start",
+      text: "",
+      cursor: { line: 0, col: 0 },
+      insert: ["h", "i"],
+      tail: ["0", "."],
+    },
+    {
+      name: "counted replay of a single char",
+      text: "",
+      cursor: { line: 0, col: 0 },
+      insert: ["X"],
+      tail: ["0", "3", "."],
+    },
+    {
+      name: "replay at end of pre-existing text",
+      text: "abc",
+      cursor: { line: 0, col: 0 },
+      insert: ["Z", "Y"],
+      tail: ["$", "."],
+    },
+    {
+      name: "replay after a word motion",
+      text: "one two",
+      cursor: { line: 0, col: 0 },
+      insert: ["Q", " "],
+      tail: ["w", "."],
+    },
+  ];
+
+  for (const payload of PARITY_PAYLOADS) {
+    it(payload.name, () => {
+      const implicit: NvimParityCase = {
+        name: `${payload.name} (implicit)`,
+        initial: { text: payload.text, cursor: payload.cursor, mode: "insert" },
+        keys: [...payload.insert, ESC, ...payload.tail],
+      };
+      const explicit: NvimParityCase = {
+        name: `${payload.name} (explicit i)`,
+        initial: { text: payload.text, cursor: payload.cursor, mode: "normal" },
+        keys: ["i", ...payload.insert, ESC, ...payload.tail],
+      };
+
+      assert.deepEqual(runPiParityCase(implicit), runPiParityCase(explicit));
+    });
+  }
 });
