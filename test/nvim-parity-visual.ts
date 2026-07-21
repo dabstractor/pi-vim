@@ -76,9 +76,9 @@ const VISUAL_CHARWISE_DELETE_PARITY_CASES: NvimParityCase[] = [
     keys: ["v", "l", "l", "d"],
   },
   {
-    name: "v9lY operates only on the current line",
+    name: "v9ld includes the newline but not the next line",
     initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
-    keys: ["v", "9", "l", "Y"],
+    keys: ["v", "9", "l", "d"],
   },
   {
     name: "vhhd deletes a backward selection",
@@ -93,6 +93,11 @@ const VISUAL_CHARWISE_DELETE_PARITY_CASES: NvimParityCase[] = [
   {
     name: "v$d deletes through the end of the line",
     initial: { text: "hello", cursor: { line: 0, col: 2 } },
+    keys: ["v", "$", "d"],
+  },
+  {
+    name: "v$d includes the trailing newline",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
     keys: ["v", "$", "d"],
   },
   {
@@ -214,6 +219,11 @@ const VISUAL_CHARWISE_YANK_PARITY_CASES: NvimParityCase[] = [
     keys: ["v", "$", "y"],
   },
   {
+    name: "v$y includes the trailing newline",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
+    keys: ["v", "$", "y"],
+  },
+  {
     name: "vjy yanks across a line boundary",
     initial: { text: "abc\ndef", cursor: { line: 0, col: 1 } },
     keys: ["v", "j", "y"],
@@ -226,6 +236,11 @@ const VISUAL_CHARWISE_YANK_PARITY_CASES: NvimParityCase[] = [
 ];
 
 const VISUAL_CHARWISE_CHANGE_PARITY_CASES: NvimParityCase[] = [
+  {
+    name: "v$c includes the trailing newline",
+    initial: { text: "abc\ndef", cursor: { line: 0, col: 0 } },
+    keys: ["v", "$", "c", "\x1b"],
+  },
   {
     name: "vlc deletes the selection and opens insert mode",
     initial: { text: "hello", cursor: { line: 0, col: 1 } },

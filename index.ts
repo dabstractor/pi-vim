@@ -1816,12 +1816,16 @@ export class ModalEditor extends CustomEditor {
       this.getVisualAnchor(),
       this.getCursor(),
     );
-    const endLine = this.getLines()[end.line] ?? "";
+    const lines = this.getLines();
+    const endLine = lines[end.line] ?? "";
+    const includesNewline =
+      end.col >= endLine.length && end.line < lines.length - 1;
     return {
       startAbs: this.getAbsoluteIndex(start.line, start.col),
       endAbs:
         this.getAbsoluteIndex(end.line, 0) +
-        getInclusiveEndColumn(endLine, end.col),
+        getInclusiveEndColumn(endLine, end.col) +
+        (includesNewline ? 1 : 0),
     };
   }
 
@@ -2285,6 +2289,10 @@ export class ModalEditor extends CustomEditor {
         break;
       case "$": {
         const { line } = this.getCurrentLineAndCol();
+        if (isVisualMode(this.mode)) {
+          this.moveCursorToCol(line.length);
+          break;
+        }
         const graphemes = getLineGraphemes(line);
         this.moveCursorToCol(graphemes[graphemes.length - 1]?.start ?? 0);
         break;
