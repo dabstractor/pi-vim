@@ -1903,21 +1903,175 @@ describe("ex pi-command bridge", () => {
     assert.equal(session.editor.getText(), "keep me");
   });
 
-  it("cannot restore a prompt a dispatch route clears asynchronously", async () => {
-    // Characterization, not an endorsement: pi's builtin and extension routes
-    // both clear the buffer synchronously before their first await, so the
-    // restore below wins. A route that cleared after an await would defeat it —
-    // that is what copyInputToClipboard exists for.
-    const session = createBridgeSession("compose");
-    session.editor.setRunCommandFn(() => {
-      void Promise.resolve().then(() => session.editor.setText(""));
+  it("restores an async clear through the default submit path", async () => {
+    const session = createEditorWithSpy("compose");
+    session.editor.setCommandNamesFn(() => new Set(["tree"]));
+    session.editor.onSubmit = async () => {
+      await Promise.resolve();
+      session.editor.setText("");
+    };
+
+    runEx(session.editor, "tree");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "compose");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("restores all prompt state after an asynchronous clear", async () => {
+    const session = createBridgeSession("hello");
+    sendKeys(session.editor, ["l", "l", "x", "u"]);
+    session.editor.setRunCommandFn(async () => {
+      await Promise.resolve();
+      session.editor.setText("");
     });
 
     runEx(session.editor, "tree");
-    assert.equal(session.editor.getText(), "compose");
+    assert.equal(session.editor.getText(), "hello");
 
     await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(session.editor.getText(), "hello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 2 });
+
+    sendKeys(session.editor, ["\x12"]);
+    assert.equal(session.editor.getText(), "helo");
+    sendKeys(session.editor, ["."]);
+    assert.equal(session.editor.getText(), "heo");
+    sendKeys(session.editor, ["u", "u"]);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("preserves input received before a delayed clear", async () => {
+    const session = createBridgeSession("hello");
+    let finishDispatch: (() => void) | undefined;
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatch = () => {
+            session.editor.setText("");
+            resolve();
+          };
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["x", "l"]);
+    assert.ok(finishDispatch);
+    finishDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "ello");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 1 });
+    sendKeys(session.editor, ["u", "."]);
+    assert.equal(session.editor.getText(), "ello");
+  });
+
+  it("keeps edits when an async dispatch settles without clearing", async () => {
+    const session = createBridgeSession("hello");
+    let finishDispatch: (() => void) | undefined;
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatch = resolve;
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["x"]);
+    assert.ok(finishDispatch);
+    finishDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "ello");
+    sendKeys(session.editor, ["u", "."]);
+    assert.equal(session.editor.getText(), "ello");
+  });
+
+  it("keeps an intentional empty prompt after async settlement", async () => {
+    const session = createBridgeSession("hello");
+    let finishDispatch: (() => void) | undefined;
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatch = resolve;
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    sendKeys(session.editor, ["d", "d"]);
     assert.equal(session.editor.getText(), "");
+    assert.ok(finishDispatch);
+    finishDispatch();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "");
+    sendKeys(session.editor, ["u"]);
+    assert.equal(session.editor.getText(), "hello");
+  });
+
+  it("handles rejected async dispatches without losing prompt state", async () => {
+    const cleared = createBridgeSession("restore me");
+    cleared.editor.setRunCommandFn(async () => {
+      await Promise.resolve();
+      cleared.editor.setText("");
+      throw new Error("dispatch failed");
+    });
+
+    runEx(cleared.editor, "tree");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(cleared.editor.getText(), "restore me");
+
+    const edited = createBridgeSession("hello");
+    let rejectDispatch: ((reason: Error) => void) | undefined;
+    edited.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectDispatch = reject;
+        }),
+    );
+
+    runEx(edited.editor, "tree");
+    sendKeys(edited.editor, ["x"]);
+    assert.ok(rejectDispatch);
+    rejectDispatch(new Error("dispatch failed"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(edited.editor.getText(), "ello");
+    sendKeys(edited.editor, ["u", "."]);
+    assert.equal(edited.editor.getText(), "ello");
+  });
+
+  it("keeps the latest prompt when async dispatches settle out of order", async () => {
+    const session = createBridgeSession("first");
+    const finishDispatches: Array<() => void> = [];
+    session.editor.setRunCommandFn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDispatches.push(() => {
+            session.editor.setText("");
+            resolve();
+          });
+        }),
+    );
+
+    runEx(session.editor, "tree");
+    session.editor.setText("second");
+    sendKeys(session.editor, ["0", "x", "u"]);
+    runEx(session.editor, "tree");
+
+    const [finishFirst, finishSecond] = finishDispatches;
+    assert.ok(finishFirst);
+    assert.ok(finishSecond);
+    finishSecond();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    finishFirst();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(session.editor.getText(), "second");
+    assert.deepEqual(session.editor.getCursor(), { line: 0, col: 0 });
+    sendKeys(session.editor, ["\x12", "."]);
+    assert.equal(session.editor.getText(), "cond");
+    sendKeys(session.editor, ["u", "u"]);
+    assert.equal(session.editor.getText(), "second");
   });
 
   it("copies the prompt to the clipboard when copyInputToClipboard is on", async () => {

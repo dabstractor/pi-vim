@@ -190,6 +190,13 @@ type EditorSnapshot = {
   cursor: { line: number; col: number };
 };
 
+type CommandDispatchResult = void | PromiseLike<void>;
+
+type DispatchState = {
+  snapshot: EditorSnapshot;
+  restore: () => void;
+};
+
 type RepeatRecording = {
   /** Raw key inputs that reconstruct one repeatable normal-mode change. */
   keys: string[];
@@ -277,12 +284,18 @@ export class ModalEditor extends CustomEditor {
   // one mechanism that reaches every command kind (builtin, extension, skill,
   // prompt), so dispatching `:name` is literally the user typing `/name` and
   // pressing Enter. Injectable so tests need no live pi runtime.
-  private runCommandFn: (commandLine: string) => void = (commandLine) => {
-    const submit = this.onSubmit;
+  private runCommandFn: (commandLine: string) => CommandDispatchResult = (
+    commandLine,
+  ) => {
+    const submit = this.onSubmit as
+      | ((text: string) => CommandDispatchResult)
+      | undefined;
     if (!submit) return;
     this.setText(commandLine);
-    submit(commandLine);
+    return submit(commandLine);
   };
+  private pendingAsyncDispatches: number = 0;
+  private restoreLatestDispatchStateFn: (() => void) | null = null;
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -325,7 +338,7 @@ export class ModalEditor extends CustomEditor {
   setModeChangeFn(fn: (mode: Mode, prevMode: Mode) => void): void {
     this.modeChangeFn = fn;
   }
-  setRunCommandFn(fn: (commandLine: string) => void): void {
+  setRunCommandFn(fn: (commandLine: string) => CommandDispatchResult): void {
     this.runCommandFn = fn;
   }
   setCommandNamesFn(fn: () => ReadonlySet<string>): void {
@@ -968,6 +981,16 @@ export class ModalEditor extends CustomEditor {
   }
 
   handleInput(data: string): void {
+    try {
+      this.handleInputCore(data);
+    } finally {
+      if (this.pendingAsyncDispatches > 0) {
+        this.restoreLatestDispatchStateFn = this.captureDispatchState().restore;
+      }
+    }
+  }
+
+  private handleInputCore(data: string): void {
     this.ensureOnChangeHook();
 
     if (this.pendingExCommand !== null) {
@@ -1324,11 +1347,31 @@ export class ModalEditor extends CustomEditor {
     this.notifyFn(`Unsupported ex command: :${command}`);
   }
 
+  private captureDispatchState(): DispatchState {
+    const snapshot = this.captureSnapshot();
+    const savedRedo = [...this.redoStack];
+    const savedRepeat = this.lastRepeatableCommand;
+    const undoStack = (this as unknown as ModalEditorInternals).undoStack;
+    const savedUndoDepth = undoStack?.length ?? 0;
+
+    return {
+      snapshot,
+      restore: () => {
+        this.restoreSnapshot(snapshot);
+        while (undoStack && undoStack.length > savedUndoDepth) undoStack.pop();
+        this.redoStack.length = 0;
+        this.redoStack.push(...savedRedo);
+        this.lastRepeatableCommand = savedRepeat;
+      },
+    };
+  }
+
   /**
    * Run `/name args` through the editor's own submit path, then put the
-   * composed prompt back. Every dispatch route clears the prompt buffer, and no
-   * command reads that buffer as an argument, so restoring the pre-dispatch
-   * snapshot is always semantically correct.
+   * composed prompt back. Reapply the latest prompt state when an asynchronous
+   * submit settles too, because some builtin routes clear the prompt only after
+   * awaiting work. No command reads that buffer as an argument, so restoring
+   * the composed state is always semantically correct.
    *
    * The dispatch is a side effect the user never typed, so it must leave no
    * trace: besides the text and cursor, the undo depth, the redo stack and the
@@ -1337,25 +1380,37 @@ export class ModalEditor extends CustomEditor {
    * next `u`.
    */
   private dispatchSlashCommand(name: string, args: string): void {
-    const saved = this.captureSnapshot();
-    const savedRedo = [...this.redoStack];
-    const savedRepeat = this.lastRepeatableCommand;
-    const undoStack = (this as unknown as ModalEditorInternals).undoStack;
-    const savedUndoDepth = undoStack?.length ?? 0;
+    const dispatchState = this.captureDispatchState();
 
-    if (this.exCommandSettings.copyInputToClipboard && saved.text) {
-      this.clipboardMirror.mirror(saved.text);
+    if (
+      this.exCommandSettings.copyInputToClipboard &&
+      dispatchState.snapshot.text
+    ) {
+      this.clipboardMirror.mirror(dispatchState.snapshot.text);
     }
 
+    let result: CommandDispatchResult;
     try {
-      this.runCommandFn(args ? `/${name} ${args}` : `/${name}`);
+      result = this.runCommandFn(args ? `/${name} ${args}` : `/${name}`);
     } finally {
-      this.restoreSnapshot(saved);
-      while (undoStack && undoStack.length > savedUndoDepth) undoStack.pop();
-      this.redoStack.length = 0;
-      this.redoStack.push(...savedRedo);
-      this.lastRepeatableCommand = savedRepeat;
+      dispatchState.restore();
     }
+
+    if (!result || typeof result.then !== "function") return;
+
+    this.pendingAsyncDispatches++;
+    this.restoreLatestDispatchStateFn = dispatchState.restore;
+    const settleDispatch = (): void => {
+      try {
+        if (this.getText() === "") this.restoreLatestDispatchStateFn?.();
+      } finally {
+        this.pendingAsyncDispatches--;
+        if (this.pendingAsyncDispatches === 0) {
+          this.restoreLatestDispatchStateFn = null;
+        }
+      }
+    };
+    void Promise.resolve(result).then(settleDispatch, settleDispatch);
   }
 
   private takeTotalCount(defaultValue: number = 1): number {

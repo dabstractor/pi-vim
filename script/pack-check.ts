@@ -119,9 +119,14 @@ const THRESHOLDS = {
   // future upstream re-export of BUILTIN_SLASH_COMMANDS would remove. Budgets
   // bumped to 46100 / 189900, leaving ~473 B packed and ~784 B unpacked
   // headroom. maxFiles stays at the cap: the next new module must bump it.
+  //
+  // Async EX restoration: index.ts now retains the latest prompt snapshot while
+  // a dispatched submit is pending and restores delayed clears on settlement.
+  // Measured: packed 46138 B, unpacked 191265 B. Budgets bumped 46100 -> 46600
+  // and 189900 -> 192000, leaving ~462 B / ~735 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 46100,
-  maxUnpackedSize: 189900,
+  maxSize: 46600,
+  maxUnpackedSize: 192000,
 } as const;
 
 function compareStrings(a: string, b: string): number {
