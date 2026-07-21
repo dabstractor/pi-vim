@@ -124,9 +124,14 @@ const THRESHOLDS = {
   // a dispatched submit is pending and restores delayed clears on settlement.
   // Measured: packed 46138 B, unpacked 191265 B. Budgets bumped 46100 -> 46600
   // and 189900 -> 192000, leaving ~462 B / ~735 B headroom. Files stay at 17.
+  //
+  // Global-only EX clipboard settings plus the defensive trust mirror entry:
+  // measured packed 46432 B, unpacked 192572 B. The packed budget still fits;
+  // unpacked is bumped 192000 -> 193300, leaving ~728 B headroom. Files stay at
+  // 17.
   maxFiles: 17,
   maxSize: 46600,
-  maxUnpackedSize: 192000,
+  maxUnpackedSize: 193300,
 } as const;
 
 function compareStrings(a: string, b: string): number {
