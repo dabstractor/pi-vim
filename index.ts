@@ -590,8 +590,22 @@ export class ModalEditor extends CustomEditor {
     return this.isOperatorCountDigit(key);
   }
 
+  /**
+   * Every Enter encoding Pi submits on: legacy `\r` plus the Kitty keyboard
+   * protocol's CSI-u forms (`\x1b[13u`, numpad Enter, the modifier-0 variants).
+   * `\n` is deliberately excluded: pi-vim treats it as the shift+enter newline
+   * (see the implicit-insert newline dot-repeat test), so it stays captured as
+   * typed text rather than cancelling the recording.
+   */
+  private isSubmitEnterInput(key: string): boolean {
+    return key !== "\n" && matchesKey(key, "enter");
+  }
+
   private shouldCancelInsertRepeatInput(key: string): boolean {
-    if (key === "\r") return true;
+    // A submit must cancel the recording, not be captured into it. A bare `\r`
+    // check missed the Kitty CSI-u Enter (`\x1b[13u`), letting it be recorded
+    // and then re-submitted on replay.
+    if (this.isSubmitEnterInput(key)) return true;
     return key === "\t" && this.isShowingAutocomplete();
   }
 
@@ -616,7 +630,7 @@ export class ModalEditor extends CustomEditor {
         // is repeatable again. Tab-completion is a host edit inside the
         // current session, so it taints the rest of that session — continued
         // typing must not resurrect a recording.
-        this.implicitInsertSuppressed = key !== "\r";
+        this.implicitInsertSuppressed = !this.isSubmitEnterInput(key);
         return;
       }
       // Implicit insert (startup / post-submit): the editor is already in

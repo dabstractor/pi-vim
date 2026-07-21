@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { ModalEditor } from "../index.js";
 import {
   createEditorWithSpy,
@@ -44,11 +45,13 @@ type AutocompleteEditor = ModalEditor & {
   isShowingAutocomplete(): boolean;
 };
 
-function makeSubmitEditor(): { editor: ModalEditor; submits: string[] } {
+function makeSubmitEditor(
+  isSubmit: (data: string) => boolean = (data) => data === "\r",
+): { editor: ModalEditor; submits: string[] } {
   const submits: string[] = [];
   const submitKeybindings = {
     matches: (data: string, action: string) =>
-      action === "tui.input.submit" && data === "\r",
+      action === "tui.input.submit" && isSubmit(data),
     getKeys: () => [] as string[],
   } as unknown as EditorCtorArgs[2];
   const editor = new ModalEditor(stubTui, stubTheme, submitKeybindings);
@@ -120,6 +123,30 @@ describe("dot repeat review regressions", () => {
     assert.deepEqual(submits, ["hi"]); // no second submit
     assert.equal(editor.getText(), "okok"); // `.` re-inserted "ok"
     assert.equal(editor.getMode(), "normal");
+  });
+
+  it("does not re-submit when a Kitty-Enter ends an implicit insert", () => {
+    // Pi maps the Kitty keyboard protocol's \x1b[13u to Enter/submit, exactly
+    // like a legacy \r. If the implicit-insert recorder only excludes \r, the
+    // Kitty-Enter gets captured and re-submits on replay: "a", Kitty-Enter,
+    // "b", Esc, "." would submit twice.
+    const KITTY_ENTER = "\x1b[13u";
+    assert.ok(matchesKey(KITTY_ENTER, "enter")); // host treats it as submit
+    const { editor, submits } = makeSubmitEditor((data) =>
+      matchesKey(data, "enter"),
+    );
+
+    // A fresh editor opens in the startup implicit insert (no vim `i`).
+    sendKeys(editor, ["a", KITTY_ENTER, "b", ESC]);
+    assert.deepEqual(submits, ["a"]); // the Kitty-Enter submitted "a"
+    assert.equal(editor.getText(), "b");
+    assert.equal(editor.getMode(), "normal");
+
+    // `.` repeats only the post-submit implicit insert ("b"); it must not
+    // resurrect the captured Kitty-Enter and submit a second time.
+    sendKeys(editor, ["0", "."]);
+    assert.deepEqual(submits, ["a"]); // still exactly one submit
+    assert.equal(editor.getText(), "bb");
   });
 
   it("keeps failed char-motion replay atomic and does not leak Escape", () => {
