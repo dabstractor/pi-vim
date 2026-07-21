@@ -160,9 +160,18 @@ const THRESHOLDS = {
   // trust-boundary, paste-policy, and getMode() corrections. Measured packed
   // 48885 B, unpacked 200117 B. Budgets bumped 48400 -> 49400 and 198000 ->
   // 200600, leaving ~515 B / ~483 B headroom. Files stay at 17.
+  //
+  // Vim-change-scoped undo: index.ts adds an undo window hung on the recorder's
+  // change boundaries (plus visual operators and the dot-repeat replay) that
+  // collapses the host undo stack to one snapshot per vim change, so one `u`
+  // reverts a whole change. ~90 LOC of fields, helpers, and wiring plus a README
+  // undo-unit paragraph, comparison row, and non-goals; no new shipped files
+  // (tests are excluded from the package). Measured packed 50585 B, unpacked
+  // 205430 B. Budgets bumped 49400 -> 51000 and 200600 -> 205900, leaving
+  // ~415 B / ~470 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 49400,
-  maxUnpackedSize: 200600,
+  maxSize: 51000,
+  maxUnpackedSize: 205900,
 } as const;
 
 function compareStrings(a: string, b: string): number {

@@ -224,7 +224,7 @@ type ModalEditorInternals = {
   tui?: { requestRender?: () => void };
   pushUndoSnapshot?: () => void;
   setCursorCol?: (col: number) => void;
-  undoStack?: { readonly length: number; pop(): unknown };
+  undoStack?: { readonly length: number; pop(): unknown; stack: unknown[] };
 };
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
@@ -260,6 +260,13 @@ export class ModalEditor extends CustomEditor {
   private replayingRepeat: boolean = false;
   private repeatReplayFailed: boolean = false;
   private bufferChangeVersion: number = 0;
+  /**
+   * One undo window per vim change, opened on the recorder's change boundaries
+   * (or a visual mutating operator). `floor` is the host `undoStack.length` at
+   * open; `openVersion` the `bufferChangeVersion`. On close the host stack is
+   * collapsed to `floor + 1`, so one host snapshot equals one vim change.
+   */
+  private undoWindow: { floor: number; openVersion: number } | null = null;
   private currentTransition: TransitionState = "none";
   private onChangeHooked: boolean = false;
   private readonly labelColorizers: ModeColorizers | null;
@@ -405,6 +412,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override setText(text: string): void {
+    this.discardUndoWindow();
     this.clearRedoStack();
     this.clearRepeatState();
     // A full host buffer reset starts a fresh session: later typing is a new
@@ -415,6 +423,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   override insertTextAtCursor(text: string): void {
+    this.discardUndoWindow();
     this.cancelRepeatableCommand();
     // A host injection mid-insert taints the session: the injected text is not
     // ours to replay, and neither is any typing that continues around it.
@@ -516,6 +525,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performUndo(count: number = this.takeTotalCount(1)): void {
+    this.discardUndoWindow();
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     for (let i = 0; i < maxSteps; i++) {
       let changed = false;
@@ -534,6 +544,7 @@ export class ModalEditor extends CustomEditor {
   }
 
   private performRedo(count: number = this.takeTotalCount(1)): void {
+    this.discardUndoWindow();
     const maxSteps = Math.max(1, Math.min(MAX_COUNT, count));
     const editor = this as unknown as ModalEditorInternals;
 
@@ -647,6 +658,10 @@ export class ModalEditor extends CustomEditor {
     if (this.mode === "insert") {
       if (this.shouldCancelInsertRepeatInput(key)) {
         this.clearRepeatState();
+        // A submit clears the host undo stack and an autocomplete accept injects
+        // host text; either way `floor` no longer indexes a valid snapshot, so
+        // discard the window. There is no cross-submit undo.
+        this.discardUndoWindow();
         // Enter submits and opens a fresh prompt, so the next implicit insert
         // is repeatable again. Tab-completion is a host edit inside the
         // current session, so it taints the rest of that session — continued
@@ -698,6 +713,11 @@ export class ModalEditor extends CustomEditor {
       captureInsert: false,
       forceCommit: false,
     };
+    // A repeatable command starts a vim change; bracket it so every host push
+    // it produces (the delete of `cw`, the per-character pushes of `p`)
+    // collapses to one unit. This runs before the command body, so `floor`
+    // precedes the mutation.
+    this.openUndoWindow();
   }
 
   /**
@@ -714,6 +734,7 @@ export class ModalEditor extends CustomEditor {
       captureInsert: true,
       forceCommit: false,
     };
+    this.openUndoWindow();
   }
 
   private clearRepeatState(): void {
@@ -766,6 +787,71 @@ export class ModalEditor extends CustomEditor {
         countOverrideKeys: [...recording.countOverrideKeys],
       };
     }
+  }
+
+  /**
+   * Open a window for the starting change, unless one is already open (a
+   * multi-key change reuses its first key's window) or a replay is in flight
+   * (the outer replay window owns the span). `floor` is captured before this
+   * turn's mutation, so `undoStack[floor]` becomes the change's first (pre-
+   * change) host push. Resetting `lastAction` forces a pure insert's first
+   * character to push that anchor despite leftover fish-style coalescing.
+   */
+  private openUndoWindow(): void {
+    if (this.replayingRepeat) return;
+    if (this.undoWindow !== null) return;
+    const editor = this as unknown as ModalEditorInternals;
+    const stack = editor.undoStack?.stack;
+    if (!stack) return;
+    this.undoWindow = {
+      floor: stack.length,
+      openVersion: this.bufferChangeVersion,
+    };
+    editor.lastAction = null;
+  }
+
+  /**
+   * Close the window at a change boundary. If the buffer mutated, collapse to
+   * `floor + 1` (keep only the pre-change snapshot); a no-op change trims any
+   * stray anchor back to `floor`, leaving prior history untouched.
+   */
+  private closeUndoWindow(): void {
+    const window = this.undoWindow;
+    this.undoWindow = null;
+    if (!window) return;
+    if (this.bufferChangeVersion === window.openVersion) {
+      this.collapseUndoStackTo(window.floor);
+      return;
+    }
+    this.collapseUndoStackTo(window.floor + 1);
+  }
+
+  /** Drop the open window without collapsing (undo/redo/reset/dispatch/submit). */
+  private discardUndoWindow(): void {
+    this.undoWindow = null;
+  }
+
+  /**
+   * Trim the host undo stack to `target` entries. A direct length trim (no
+   * `setText`/`onChange`) so `centralInvalidationCheck` is not tripped.
+   */
+  private collapseUndoStackTo(target: number): void {
+    const stack = (this as unknown as ModalEditorInternals).undoStack?.stack;
+    if (!stack) return;
+    if (stack.length > target) stack.length = target;
+  }
+
+  /**
+   * Settle the window in the input `finally`, mirroring the recorder: hold
+   * while in insert mode or while an operator/motion/text-object is pending;
+   * otherwise close. Suppressed during a replay (the outer window collapses).
+   */
+  private settleUndoWindowAfterInput(): void {
+    if (this.replayingRepeat) return;
+    if (this.undoWindow === null) return;
+    if (this.mode === "insert") return;
+    if (this.isRepeatRecordingInProgress()) return;
+    this.closeUndoWindow();
   }
 
   private isTextInsertRepeatCommand(command: RepeatableCommand): boolean {
@@ -846,6 +932,11 @@ export class ModalEditor extends CustomEditor {
 
     this.repeatRecording = null;
     this.repeatReplayFailed = false;
+    // A `.` replay is one undo unit, separate from the change it repeats. Wrap
+    // it in one outer window opened before `replayingRepeat` goes high;
+    // per-keystroke windows are suppressed during replay, so only this one
+    // collapses.
+    this.openUndoWindow();
     this.replayingRepeat = true;
     try {
       for (const key of replayKeys) {
@@ -864,8 +955,11 @@ export class ModalEditor extends CustomEditor {
       this.unnamedRegister = beforeRegister;
       this.preferRegisterForPut = beforePreferRegisterForPut;
       this.repeatReplayFailed = false;
+      this.discardUndoWindow();
       return;
     }
+
+    this.closeUndoWindow();
 
     if (hasOverrideCount) {
       this.lastRepeatableCommand = {
@@ -1231,6 +1325,7 @@ export class ModalEditor extends CustomEditor {
       this.handleNormalMode(data);
     } finally {
       this.finishRepeatRecordingAfterInput();
+      this.settleUndoWindowAfterInput();
     }
   }
 
@@ -1494,6 +1589,10 @@ export class ModalEditor extends CustomEditor {
    * next `u`.
    */
   private dispatchThroughSubmit(commandLine: string): void {
+    // A dispatch is not a user change: discard any window so no collapse runs
+    // mid-dispatch and no floor is stranded. The bridge's `savedUndoDepth`
+    // restore then erases the phantom `setText("")` checkpoint.
+    this.discardUndoWindow();
     const dispatchState = this.captureDispatchState();
 
     if (
@@ -1954,7 +2053,13 @@ export class ModalEditor extends CustomEditor {
     this.takeTotalCount(1);
     // Mutating visual edits are excluded from dot-repeat and supersede the
     // older change. A visual yank is not a change, so it preserves that repeat.
-    if (operator !== "y") this.clearRepeatState();
+    if (operator !== "y") {
+      this.clearRepeatState();
+      // Visual `c`/`d` bypass the recorder but still mutate and are single undo
+      // units. Open the window before the delete; the input `finally` closes it
+      // — at once for visual `d`, or on the `<Esc>` ending the visual-`c` insert.
+      this.openUndoWindow();
+    }
 
     // Both branches resolve the selection before dropping the anchor.
     const anchor = this.getVisualAnchor();
