@@ -27,11 +27,46 @@ const PUT_PARITY_CASES: NvimParityCase[] = [
     initial: { text: "a\nb", cursor: { line: 1, col: 0 }, register: "X\n" },
     keys: ["P"],
   },
+  {
+    name: "yy then p lands on the first non-blank of the pasted line",
+    initial: { text: "hello", cursor: { line: 0, col: 2 }, register: "" },
+    keys: ["y", "y", "p"],
+  },
+  {
+    name: "counted line-wise p lands on the first pasted line",
+    initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "X\n" },
+    keys: ["3", "p"],
+  },
+  {
+    name: "counted line-wise P lands on the first pasted line",
+    initial: { text: "a\nb", cursor: { line: 1, col: 0 }, register: "X\n" },
+    keys: ["3", "P"],
+  },
+  {
+    name: "multi-line line-wise register p lands on the first pasted line",
+    initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "X\nY\n" },
+    keys: ["p"],
+  },
+  {
+    name: "line-wise p with a leading-whitespace first line lands on its first non-blank",
+    initial: { text: "a\nb", cursor: { line: 0, col: 0 }, register: "  foo\n" },
+    keys: ["p"],
+  },
+  {
+    // Documented divergence: Vim's `^` lands on the last char of an
+    // all-whitespace line; the shared first-non-blank helper returns col 0.
+    name: "line-wise p with an all-whitespace first line (^ divergence)",
+    initial: {
+      text: "a\nb",
+      cursor: { line: 0, col: 0 },
+      register: "   \nyz\n",
+    },
+    keys: ["p"],
+  },
 ];
 
 const KNOWN_NVIM_PUT_PARITY_GAPS = new Set([
-  "p puts a line-wise register below the current line",
-  "P puts a line-wise register above the current line",
+  "line-wise p with an all-whitespace first line (^ divergence)",
 ]);
 
 const JOIN_PARITY_CASES: NvimParityCase[] = [

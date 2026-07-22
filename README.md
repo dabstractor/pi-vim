@@ -365,6 +365,8 @@ implemented and cancel the pending operator. Linewise counted yank (`{count}yy`,
 
 Put reads the OS clipboard first unless the last local register write was not mirrored. Paste text ending in `\n` is line-wise.
 
+Cursor placement matches Vim. A line-wise put (`yyp`, `yyP`, or any register ending in `\n`) lands on the **first non-blank** of the **first** pasted line, not the end of the pasted text. A char-wise put lands on the **last** inserted character.
+
 ---
 
 ### undo / redo / repeat
@@ -433,6 +435,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 | `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
 | `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
 | `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
+| Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
 | Visual selection rendering | No highlight; only the footer label and the block cursor mark the selection | Selection is highlighted |

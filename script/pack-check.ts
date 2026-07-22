@@ -194,9 +194,17 @@ const THRESHOLDS = {
   // README's two "inherit" paragraphs are rewritten to that contract. Measured
   // packed 53506 B, unpacked 214184 B — both still under the existing budgets,
   // so they are unchanged, leaving ~494 B / ~316 B headroom. Files stay at 17.
+  //
+  // Line-wise put cursor fix (issue #39): putAfter/putBefore capture the first
+  // pasted line and move the cursor to its first non-blank after inserting
+  // (adapted from PR #40); README documents the cursor placement plus the
+  // all-whitespace-first-line `^` divergence, and modal-editor/nvim-parity
+  // tests pin it. Measured packed 53820 B, unpacked 215321 B. The packed budget
+  // still fits (~180 B headroom); unpacked is bumped 214500 -> 215800, leaving
+  // ~479 B headroom. Files stay at 17.
   maxFiles: 17,
   maxSize: 54000,
-  maxUnpackedSize: 214500,
+  maxUnpackedSize: 215800,
 } as const;
 
 function compareStrings(a: string, b: string): number {

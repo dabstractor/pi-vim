@@ -7539,6 +7539,74 @@ describe("put — line-wise", () => {
     assert.equal(lines[0], "hello");
     assert.equal(lines[1], "hello");
   });
+
+  it("yyp leaves the cursor on the first non-blank of the pasted line below", () => {
+    // Vim: line-wise `p` lands on the first inserted line, not the last typed
+    // char. Regression for the yyp end-of-line cursor bug (issue #39).
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["y", "y", "p"]);
+    assert.equal(editor.getText(), "hello\nhello");
+    assert.equal(editor.getMode(), "normal");
+    assert.equal(editor.getRegister(), "hello\n");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("yyP leaves the cursor on the first non-blank of the pasted line above", () => {
+    const { editor } = createEditorWithSpy("hello");
+    sendKeys(editor, ["y", "y", "P"]);
+    assert.equal(editor.getText(), "hello\nhello");
+    assert.equal(editor.getMode(), "normal");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("yyp cursor honors an indented line's first non-blank column", () => {
+    const { editor } = createEditorWithSpy("  hello");
+    sendKeys(editor, ["y", "y", "p"]);
+    assert.equal(editor.getText(), "  hello\n  hello");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 2 });
+  });
+
+  it("counted line-wise p lands on the first pasted line", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("X\n");
+    sendKeys(editor, ["3", "p"]);
+    assert.equal(editor.getText(), "a\nX\nX\nX\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("counted line-wise P lands on the first pasted line", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("X\n");
+    sendKeys(editor, ["j", "3", "P"]);
+    assert.equal(editor.getText(), "a\nX\nX\nX\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("multi-line line-wise register lands on the first pasted line", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("X\nY\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\nX\nY\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
+
+  it("line-wise put with a leading-whitespace first line lands on its first non-blank", () => {
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("  foo\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\n  foo\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 2 });
+  });
+
+  it("line-wise put with an all-whitespace first line lands at col 0 (^ divergence)", () => {
+    // Documented divergence: Vim's `^` puts the cursor on the last char of an
+    // all-whitespace line, but the shared first-non-blank helper returns col 0.
+    const { editor } = createMultiLineEditor("a\nb");
+    editor.setRegister("   \nyz\n");
+    sendKeys(editor, ["p"]);
+    assert.equal(editor.getText(), "a\n   \nyz\nb");
+    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
+  });
 });
 
 // ---------------------------------------------------------------------------

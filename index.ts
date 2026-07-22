@@ -3887,6 +3887,7 @@ export class ModalEditor extends CustomEditor {
 
     if (text.endsWith("\n")) {
       const content = text.slice(0, -1);
+      const targetLine = this.getCursor().line + 1;
       for (let i = 0; i < safeCount; i++) {
         super.handleInput(CTRL_E);
         super.handleInput(NEWLINE);
@@ -3894,6 +3895,11 @@ export class ModalEditor extends CustomEditor {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
+      // Vim: line-wise `p` leaves the cursor on the first non-blank of the
+      // first inserted line (one line below the original cursor). An
+      // all-whitespace first line lands at col 0, sharing the `^` divergence.
+      this.moveCursorToLineStart(targetLine);
+      this.moveCursorToFirstNonWhitespace();
       return;
     }
 
@@ -3919,6 +3925,7 @@ export class ModalEditor extends CustomEditor {
 
     if (text.endsWith("\n")) {
       const content = text.slice(0, -1);
+      const targetLine = this.getCursor().line;
       for (let i = 0; i < safeCount; i++) {
         super.handleInput(CTRL_A);
         super.handleInput(NEWLINE);
@@ -3927,6 +3934,11 @@ export class ModalEditor extends CustomEditor {
           super.handleInput(char === "\n" ? NEWLINE : char);
         }
       }
+      // Vim: line-wise `P` leaves the cursor on the first non-blank of the
+      // first inserted line (the cursor's original line, since `P` inserts
+      // above). All-whitespace first line lands at col 0 (`^` divergence).
+      this.moveCursorToLineStart(targetLine);
+      this.moveCursorToFirstNonWhitespace();
       return;
     }
 
