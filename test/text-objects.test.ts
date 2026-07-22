@@ -59,21 +59,77 @@ describe("resolveWordTextObjectRange", () => {
     });
   });
 
-  it("chooses the next word from whitespace, or the previous word when there is no next word", () => {
+  it("selects the whitespace run itself when the cursor is on whitespace", () => {
+    // nvim: `diw` on a space selects the whitespace run, not the next word.
     assert.deepEqual(resolveWordTextObjectRange("foo   bar", 0, 3, "i"), {
-      startAbs: 6,
-      endAbs: 9,
+      startAbs: 3,
+      endAbs: 6,
     });
     assert.deepEqual(resolveWordTextObjectRange("foo   ", 0, 4, "i"), {
-      startAbs: 0,
-      endAbs: 3,
+      startAbs: 3,
+      endAbs: 6,
     });
   });
 
-  it("includes intervening whitespace for counted inner word objects", () => {
+  it("selects the punctuation run when the cursor is on punctuation", () => {
+    // nvim: `diw` on `.` in `foo.bar` deletes only `.`, not the next word.
+    assert.deepEqual(resolveWordTextObjectRange("foo.bar", 0, 3, "i"), {
+      startAbs: 3,
+      endAbs: 4,
+    });
+    // `a -> b`, cursor on `-`: the `->` punctuation run.
+    assert.deepEqual(resolveWordTextObjectRange("a -> b", 0, 2, "i"), {
+      startAbs: 2,
+      endAbs: 4,
+    });
+  });
+
+  it("treats accented and CJK characters as word characters", () => {
+    // `café au`, cursor on `c`: the whole accented word (nvim keeps `é`).
+    assert.deepEqual(resolveWordTextObjectRange("café au", 0, 0, "i"), {
+      startAbs: 0,
+      endAbs: 4,
+    });
+    // `中文 test`, cursor on `中`: the CJK word run.
+    assert.deepEqual(resolveWordTextObjectRange("中文 test", 0, 0, "i"), {
+      startAbs: 0,
+      endAbs: 2,
+    });
+  });
+
+  it("counts consecutive runs (whitespace included) for counted inner words", () => {
+    // nvim `2diw` on `foo bar baz` selects `foo ` (word + whitespace run).
     assert.deepEqual(resolveWordTextObjectRange("foo bar baz", 0, 1, "i", 2), {
       startAbs: 0,
+      endAbs: 4,
+    });
+    // `3diw` extends across the next word too: `foo bar`.
+    assert.deepEqual(resolveWordTextObjectRange("foo bar baz", 0, 1, "i", 3), {
+      startAbs: 0,
       endAbs: 7,
+    });
+    // From a punctuation-separated run: `foo.bar` `2iw` -> `foo.`.
+    assert.deepEqual(resolveWordTextObjectRange("foo.bar", 0, 0, "i", 2), {
+      startAbs: 0,
+      endAbs: 4,
+    });
+  });
+
+  it("selects the whitespace run plus the following word for aw on whitespace", () => {
+    // nvim `daw` on a space selects the whitespace and the next word.
+    assert.deepEqual(resolveWordTextObjectRange("foo   bar", 0, 3, "a"), {
+      startAbs: 3,
+      endAbs: 9,
+    });
+    // Trailing whitespace with no following word: nothing to select.
+    assert.equal(resolveWordTextObjectRange("foo   ", 0, 4, "a"), null);
+  });
+
+  it("selects a punctuation run plus trailing whitespace for aw", () => {
+    // `a -> b`, cursor on `-`: `daw` deletes `-> ` (run + trailing space).
+    assert.deepEqual(resolveWordTextObjectRange("a -> b", 0, 2, "a"), {
+      startAbs: 2,
+      endAbs: 5,
     });
   });
 

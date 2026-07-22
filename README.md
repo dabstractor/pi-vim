@@ -266,14 +266,15 @@ Text objects compose as `d`/`c`/`y` + `i`/`a` + object. `i` means inner; `a` mea
 
 | object | keys | range |
 |---|---|---|
-| word | `iw` / `aw` | Keyword word; `aw` includes spaces |
-| WORD | `iW` / `aW` | Line-local whitespace-delimited WORD; `aW` includes adjacent whitespace |
+| word | `iw` / `aw` | Word, punctuation, or whitespace run under the cursor; `aw` adds adjacent whitespace |
+| WORD | `iW` / `aW` | Line-local WORD or whitespace run under the cursor; `aW` adds adjacent whitespace |
 | quotes | `i"` / `a"`, `i'` / `a'`, <code>i`</code> / <code>a`</code> | Smallest containing quote pair on the line |
 | parentheses | `i(` / `a(`; aliases `i)` / `a)`, `ib` / `ab` | Smallest containing pair |
 | brackets | `i[` / `a[`; aliases `i]` / `a]` | Smallest containing pair |
 | braces | `i{` / `a{`; aliases `i}` / `a}`, `iB` / `aB` | Smallest containing pair |
 
 Semantics:
+- Word objects follow Neovim's three character classes — keyword (letters including accented and CJK, digits, `_`), punctuation, and whitespace. `iw` selects the run under the cursor (so on `.` or on a space it takes that run, not the next word), and counts span consecutive runs (`2iw` is a word plus the following whitespace). `aw` on a word adds trailing whitespace, or leading whitespace when there is none; on whitespace it adds the following word. `iW`/`aW` collapse punctuation into the WORD, leaving just non-blank and whitespace runs.
 - WORD objects are line-local and whitespace-delimited.
 - Quote objects are line-local; odd-backslash escapes are ignored; `a` includes delimiters only, not surrounding whitespace.
 - Bracket objects are buffer-aware, nested, lexical, and not parser-aware; brackets inside strings/comments still count.

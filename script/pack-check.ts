@@ -202,9 +202,17 @@ const THRESHOLDS = {
   // tests pin it. Measured packed 53820 B, unpacked 215321 B. The packed budget
   // still fits (~180 B headroom); unpacked is bumped 214500 -> 215800, leaving
   // ~479 B headroom. Files stay at 17.
+  //
+  // Inner-word (iw/aw) three-class parity: text-objects.ts replaces the
+  // two-class word/non-word scan with nvim's blank/punctuation/word classes
+  // (Unicode-aware word chars), so `iw`/`aw` select the run under the cursor
+  // and count consecutive runs like nvim. README documents the behavior and
+  // modal-editor + nvim-parity-text-objects tests pin it. Measured packed
+  // 54710 B, unpacked 217561 B. Budgets bumped 54000 -> 55000 and 215800 ->
+  // 218500, leaving ~290 B / ~939 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 54000,
-  maxUnpackedSize: 215800,
+  maxSize: 55000,
+  maxUnpackedSize: 218500,
 } as const;
 
 function compareStrings(a: string, b: string): number {

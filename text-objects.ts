@@ -57,17 +57,22 @@ function findLogicalLineBounds(
   return { start, end: nextNewline === -1 ? line.length : nextNewline };
 }
 
-function isWordTextObjectChar(
-  ch: string | undefined,
-  semanticClass: WordTextObjectClass,
-): boolean {
-  if (ch === undefined) return false;
-  if (semanticClass === "WORD") return !/\s/.test(ch);
-  return /\w/.test(ch);
-}
+/**
+ * Vim character classes for word text objects: 0 = blank, 1 = other
+ * (non-blank punctuation/symbol), 2 = word (keyword). `iW`/`aW` collapse
+ * every non-blank character into the single word class. Matches nvim's
+ * `cls()` split, which is what `iw`/`aw` scan over.
+ */
+type WordCharClass = 0 | 1 | 2;
 
-function isWhitespace(ch: string | undefined): boolean {
-  return ch !== undefined && /\s/.test(ch);
+// Unicode-aware keyword test: letters, numbers, combining marks (so grapheme
+// clusters such as a base letter plus combining accent stay in one word), and
+// underscore. Mirrors nvim treating accented Latin and CJK as word characters,
+// unlike the ASCII-only `\w`.
+const WORD_CHAR_PATTERN = /[\p{L}\p{N}\p{M}_]/u;
+
+function isWordChar(ch: string): boolean {
+  return WORD_CHAR_PATTERN.test(ch);
 }
 
 function pairKind(ch?: string): MatchingPairKind | null {
@@ -292,60 +297,78 @@ export function resolveWordTextObjectRange(
   const bounds = findLogicalLineBounds(line, cursor);
   if (bounds.start >= bounds.end) return null;
 
-  const hasWordChar = (idx: number) =>
-    idx >= bounds.start &&
-    idx < bounds.end &&
-    isWordTextObjectChar(line[idx], semanticClass);
-
-  let col = Math.max(bounds.start, Math.min(cursor, bounds.end - 1));
-
-  if (!hasWordChar(col)) {
-    let right = col;
-    while (right < bounds.end && !hasWordChar(right)) right++;
-
-    if (right < bounds.end) {
-      col = right;
-    } else {
-      let left = Math.min(col, bounds.end - 1);
-      while (left >= bounds.start && !hasWordChar(left)) left--;
-      if (left < bounds.start) return null;
-      col = left;
-    }
-  }
-
-  let start = col;
-  while (start > bounds.start && hasWordChar(start - 1)) start--;
-
-  let end = col + 1;
-  while (end < bounds.end && hasWordChar(end)) end++;
-
-  let remaining = normalizeCount(count) - 1;
-  while (remaining > 0) {
-    let nextWordStart = end;
-    while (nextWordStart < bounds.end && !hasWordChar(nextWordStart))
-      nextWordStart++;
-    if (nextWordStart >= bounds.end) break;
-
-    let nextWordEnd = nextWordStart + 1;
-    while (nextWordEnd < bounds.end && hasWordChar(nextWordEnd)) nextWordEnd++;
-
-    end = nextWordEnd;
-    remaining--;
-  }
-
-  if (kind === "a") {
-    let aroundEnd = end;
-    while (aroundEnd < bounds.end && isWhitespace(line[aroundEnd])) aroundEnd++;
-
-    if (aroundEnd > end) {
-      end = aroundEnd;
-    } else {
-      while (start > bounds.start && isWhitespace(line[start - 1])) start--;
-    }
-  }
-
-  return {
-    startAbs: lineStartAbs + start,
-    endAbs: lineStartAbs + end,
+  // Class of the character at idx within the current logical line, or null
+  // when idx falls outside the line (a boundary).
+  const classAt = (idx: number): WordCharClass | null => {
+    if (idx < bounds.start || idx >= bounds.end) return null;
+    const ch = line[idx];
+    if (ch === undefined || ch === "\n") return null;
+    if (/\s/.test(ch)) return 0;
+    if (semanticClass === "WORD") return 2;
+    return isWordChar(ch) ? 2 : 1;
   };
+
+  // Extend `end` over the maximal run of the class starting at `end`.
+  const extendRun = (end: number): number => {
+    const runClass = classAt(end);
+    if (runClass === null) return end;
+    let next = end;
+    while (next < bounds.end && classAt(next) === runClass) next++;
+    return next;
+  };
+
+  const totalCount = normalizeCount(count);
+  const cursorCol0 = Math.max(bounds.start, Math.min(cursor, bounds.end - 1));
+  const cursorClass = classAt(cursorCol0);
+  if (cursorClass === null) return null;
+
+  // The run under the cursor, whatever its class (word, punctuation, or the
+  // whitespace run itself — nvim's `iw`/`aw` select whichever the cursor is on).
+  let start = cursorCol0;
+  while (start > bounds.start && classAt(start - 1) === cursorClass) start--;
+  let end = cursorCol0 + 1;
+  while (end < bounds.end && classAt(end) === cursorClass) end++;
+
+  if (kind === "i") {
+    // `count` consecutive runs (whitespace runs are counted too), forward.
+    let remaining = totalCount - 1;
+    while (remaining > 0 && end < bounds.end) {
+      end = extendRun(end);
+      remaining--;
+    }
+    return { startAbs: lineStartAbs + start, endAbs: lineStartAbs + end };
+  }
+
+  // kind === "a"
+  if (cursorClass === 0) {
+    // On whitespace: the run plus the following word(s); if there is no
+    // following word at all, there is nothing to select (nvim beeps / no-ops).
+    if (end >= bounds.end) return null;
+    let words = totalCount;
+    while (words > 0 && end < bounds.end) {
+      while (end < bounds.end && classAt(end) === 0) end++;
+      if (end >= bounds.end) break;
+      end = extendRun(end);
+      words--;
+    }
+    return { startAbs: lineStartAbs + start, endAbs: lineStartAbs + end };
+  }
+
+  // On a word/punctuation run: `count` non-blank words with the whitespace
+  // between them, then trailing whitespace; if none, leading whitespace.
+  let words = totalCount - 1;
+  while (words > 0 && end < bounds.end) {
+    while (end < bounds.end && classAt(end) === 0) end++;
+    if (end >= bounds.end) break;
+    end = extendRun(end);
+    words--;
+  }
+
+  if (classAt(end) === 0) {
+    end = extendRun(end); // trailing whitespace
+  } else {
+    while (start > bounds.start && classAt(start - 1) === 0) start--;
+  }
+
+  return { startAbs: lineStartAbs + start, endAbs: lineStartAbs + end };
 }

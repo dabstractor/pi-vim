@@ -5078,8 +5078,13 @@ describe("word text objects — iw / aw", () => {
     chk("foo bar", ["d", "i", "w"], " bar", "foo");
   });
 
-  it("d2iw deletes two inner words", () => {
-    chk("foo bar baz", ["d", "2", "i", "w"], " baz", "foo bar");
+  it("d2iw spans a word and the following whitespace run", () => {
+    // nvim counts consecutive class runs: `2iw` on `foo` is `foo` + the space.
+    chk("foo bar baz", ["d", "2", "i", "w"], "bar baz", "foo ");
+  });
+
+  it("d3iw spans word, whitespace, and the next word", () => {
+    chk("foo bar baz", ["d", "3", "i", "w"], " baz", "foo bar");
   });
 
   it("daw deletes word + trailing spaces", () => {
@@ -5096,14 +5101,49 @@ describe("word text objects — iw / aw", () => {
     assert.equal(editor.getRegister(), " bar");
   });
 
-  it("diw from whitespace chooses the next word", () => {
+  it("diw from whitespace selects the whitespace run", () => {
+    // nvim: on whitespace, `iw` is the whitespace run itself, not the next word.
     const { editor } = createEditorWithSpy("foo   bar");
 
     setInternalCursor(editor, 3);
     sendKeys(editor, ["d", "i", "w"]);
 
-    assert.equal(editor.getText(), "foo   ");
-    assert.equal(editor.getRegister(), "bar");
+    assert.equal(editor.getText(), "foobar");
+    assert.equal(editor.getRegister(), "   ");
+  });
+
+  it("daw from whitespace adds the following word", () => {
+    // nvim: on whitespace, `aw` is the whitespace run plus the following word.
+    const { editor } = createEditorWithSpy("foo   bar baz");
+
+    setInternalCursor(editor, 3);
+    sendKeys(editor, ["d", "a", "w"]);
+
+    assert.equal(editor.getText(), "foo baz");
+    assert.equal(editor.getRegister(), "   bar");
+  });
+
+  it("diw on punctuation selects only the punctuation run", () => {
+    // nvim: on `.`, `iw` deletes just the punctuation, not the next word.
+    const { editor } = createEditorWithSpy("foo.bar");
+
+    setInternalCursor(editor, 3);
+    sendKeys(editor, ["d", "i", "w"]);
+
+    assert.equal(editor.getText(), "foobar");
+    assert.equal(editor.getRegister(), ".");
+  });
+
+  it("diw keeps accented and CJK letters in one word", () => {
+    const accented = createEditorWithSpy("café au").editor;
+    sendKeys(accented, ["d", "i", "w"]);
+    assert.equal(accented.getText(), " au");
+    assert.equal(accented.getRegister(), "café");
+
+    const cjk = createEditorWithSpy("中文 test").editor;
+    sendKeys(cjk, ["d", "i", "w"]);
+    assert.equal(cjk.getText(), " test");
+    assert.equal(cjk.getRegister(), "中文");
   });
 
   it("yiw yanks inner word without mutation", () => {
@@ -5180,42 +5220,43 @@ describe("WORD text objects — iW / aW", () => {
     assert.equal(editor.getText(), "foo");
   });
 
-  it("d2iW and d2aW count WORDs using word-object whitespace policy", () => {
-    const { editor: inner } = createEditorWithSpy(
-      "foo path/to-file --flag=value bar",
-    );
-    const { editor: around } = createEditorWithSpy(
-      "foo path/to-file --flag=value bar",
-    );
+  it("d2iW spans a WORD and the following whitespace run", () => {
+    // nvim `2iW` counts consecutive runs: the WORD plus the trailing space.
+    const { editor } = createEditorWithSpy("foo path/to-file --flag=value bar");
 
-    setInternalCursor(inner, 4);
-    sendKeys(inner, ["d", "2", "i", "W"]);
+    setInternalCursor(editor, 4);
+    sendKeys(editor, ["d", "2", "i", "W"]);
 
-    assert.equal(inner.getRegister(), "path/to-file --flag=value");
-    assert.equal(inner.getText(), "foo  bar");
-
-    setInternalCursor(around, 4);
-    sendKeys(around, ["d", "2", "a", "W"]);
-
-    assert.equal(around.getRegister(), "path/to-file --flag=value ");
-    assert.equal(around.getText(), "foo bar");
+    assert.equal(editor.getRegister(), "path/to-file ");
+    assert.equal(editor.getText(), "foo --flag=value bar");
   });
 
-  it("chooses next WORD from whitespace or previous WORD when there is no next WORD", () => {
+  it("d2aW spans two WORDs with their whitespace", () => {
+    const { editor } = createEditorWithSpy("foo path/to-file --flag=value bar");
+
+    setInternalCursor(editor, 4);
+    sendKeys(editor, ["d", "2", "a", "W"]);
+
+    assert.equal(editor.getRegister(), "path/to-file --flag=value ");
+    assert.equal(editor.getText(), "foo bar");
+  });
+
+  it("diW on whitespace selects the whitespace run", () => {
+    // nvim: on whitespace, `iW` is the whitespace run, not the next WORD.
     const { editor: next } = createEditorWithSpy("foo   path/to-file");
-    const { editor: previous } = createEditorWithSpy("foo/path   ");
+    const { editor: trailing } = createEditorWithSpy("foo/path   ");
 
     setInternalCursor(next, 3);
     sendKeys(next, ["d", "i", "W"]);
 
-    assert.equal(next.getRegister(), "path/to-file");
-    assert.equal(next.getText(), "foo   ");
+    assert.equal(next.getRegister(), "   ");
+    assert.equal(next.getText(), "foopath/to-file");
 
-    setInternalCursor(previous, 8);
-    sendKeys(previous, ["d", "i", "W"]);
+    setInternalCursor(trailing, 8);
+    sendKeys(trailing, ["d", "i", "W"]);
 
-    assert.equal(previous.getRegister(), "foo/path");
-    assert.equal(previous.getText(), "   ");
+    assert.equal(trailing.getRegister(), "   ");
+    assert.equal(trailing.getText(), "foo/path");
   });
 
   it("does not cross logical lines", () => {
@@ -6090,10 +6131,12 @@ describe("dot repeat — .", () => {
   it("repeats text-object deletes", () => {
     const { editor } = createEditorWithSpy("foo bar baz");
 
+    // diw deletes `foo`, leaving the cursor on the following space; `.` repeats
+    // diw on that whitespace run (a single space), matching nvim.
     sendKeys(editor, ["d", "i", "w", "."]);
 
-    assert.equal(editor.getText(), "  baz");
-    assert.equal(editor.getRegister(), "bar");
+    assert.equal(editor.getText(), "bar baz");
+    assert.equal(editor.getRegister(), " ");
   });
 
   it("repeats text-object changes with captured insert text", () => {
