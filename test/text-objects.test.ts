@@ -143,11 +143,12 @@ describe("resolveWordTextObjectRange", () => {
     );
   });
 
-  it("does not cross newline boundaries", () => {
-    assert.deepEqual(resolveWordTextObjectRange("foo\nbar", 0, 1, "i", 2), {
-      startAbs: 0,
-      endAbs: 3,
-    });
+  it("no-ops a counted inner word that cannot be satisfied on the line", () => {
+    // pi-vim keeps word text objects inside the logical line, so `2iw` on the
+    // sole word of a line has no second run to extend over. An unsatisfiable
+    // count is a no-op (null), not a partial delete of the first run.
+    assert.equal(resolveWordTextObjectRange("foo\nbar", 0, 1, "i", 2), null);
+    assert.equal(resolveWordTextObjectRange("foo", 0, 1, "i", 2), null);
   });
 
   it("returns null for empty or whitespace-only lines", () => {

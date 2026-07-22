@@ -5264,13 +5264,18 @@ describe("WORD text objects — iW / aW", () => {
     assert.equal(trailing.getText(), "foo/path");
   });
 
-  it("does not cross logical lines", () => {
+  it("no-ops a counted WORD it cannot satisfy without crossing lines", () => {
+    // pi-vim keeps word objects inside the logical line, so `2iW` on a line with
+    // a single WORD has no second run to extend over. An unsatisfiable count is
+    // a no-op (register preserved), not a partial delete; the cursor drops on
+    // the last char of the line, matching nvim's failed-object cursor move.
     const { editor } = createMultiLineEditor("foo/path\nbar/baz");
 
     sendKeys(editor, ["d", "2", "i", "W"]);
 
-    assert.equal(editor.getRegister(), "foo/path");
-    assert.equal(editor.getText(), "\nbar/baz");
+    assert.equal(editor.getText(), "foo/path\nbar/baz");
+    assert.equal(editor.getRegister(), "");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 7 });
   });
 });
 

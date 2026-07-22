@@ -117,6 +117,33 @@ const INNER_WORD_CLASS_CASES: NvimParityCase[] = [
   },
 ];
 
+// Unsatisfiable counted objects. nvim treats a count that runs out of runs on
+// the line as a no-op: the buffer and register are untouched and only the
+// cursor drops on the last char of the line where the object motion ran out.
+// pi-vim previously deleted the partial span it had collected.
+const UNSATISFIABLE_COUNT_CASES: NvimParityCase[] = [
+  {
+    name: "2diw on the sole word is a no-op",
+    initial: { text: "foo", cursor: { line: 0, col: 1 } },
+    keys: ["2", "d", "i", "w"],
+  },
+  {
+    name: "3diw spanning past EOL is a no-op",
+    initial: { text: "foo", cursor: { line: 0, col: 1 } },
+    keys: ["3", "d", "i", "w"],
+  },
+  {
+    name: "4diw past the last word is a no-op",
+    initial: { text: "foo bar", cursor: { line: 0, col: 1 } },
+    keys: ["4", "d", "i", "w"],
+  },
+  {
+    name: "2daw on the last word is a no-op",
+    initial: { text: "foo bar", cursor: { line: 0, col: 5 } },
+    keys: ["2", "d", "a", "w"],
+  },
+];
+
 const QUOTE_TEXT_OBJECT_CASES: NvimParityCase[] = [
   {
     name: 'di" deletes inside double quotes',
@@ -176,6 +203,7 @@ const DELIMITED_TEXT_OBJECT_CASES: NvimParityCase[] = [
 const TEXT_OBJECT_FINAL_STATE_CASES: NvimParityCase[] = [
   ...WORD_TEXT_OBJECT_CASES,
   ...INNER_WORD_CLASS_CASES,
+  ...UNSATISFIABLE_COUNT_CASES,
   ...QUOTE_TEXT_OBJECT_CASES,
   ...DELIMITED_TEXT_OBJECT_CASES,
 ];

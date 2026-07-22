@@ -1845,6 +1845,14 @@ export class ModalEditor extends CustomEditor {
         semanticClass,
       );
       if (!range || !this.pendingOperator) {
+        // A word text object that cannot be satisfied (e.g. `2diw` on a lone
+        // word, `daw` on trailing whitespace) leaves the buffer and register
+        // untouched in nvim, but still drops the cursor on the last char of the
+        // line where the object motion ran out. Match that cursor move so the
+        // no-op stays in parity.
+        if (range === null && this.pendingOperator !== null) {
+          this.moveCursorToLastGraphemeOnLine();
+        }
         this.pendingOperator = null;
         this.cancelRepeatableCommand();
         return;
@@ -3936,6 +3944,12 @@ export class ModalEditor extends CustomEditor {
 
     const range = this.getGraphemeRangeAtCol(line, col - 1, 1);
     if (range) this.moveCursorToCol(range.start);
+  }
+
+  private moveCursorToLastGraphemeOnLine(): void {
+    const { line } = this.getCurrentLineAndCol();
+    const graphemes = getLineGraphemes(line);
+    this.moveCursorToCol(graphemes[graphemes.length - 1]?.start ?? 0);
   }
 
   private putAfter(): void {

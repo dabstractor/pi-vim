@@ -360,6 +360,10 @@ export function resolveWordTextObjectRange(
       end = extendRun(end);
       remaining--;
     }
+    // A count that runs out of line before it is satisfied is a no-op in nvim,
+    // not a partial delete (`2diw` on the sole word `foo` preserves the
+    // register); cancel by returning null.
+    if (remaining > 0) return null;
     return { startAbs: lineStartAbs + start, endAbs: lineStartAbs + end };
   }
 
@@ -375,6 +379,9 @@ export function resolveWordTextObjectRange(
       end = extendRun(end);
       words--;
     }
+    // Not enough following words to satisfy the count: no-op (nvim preserves
+    // the register) rather than deleting a partial span.
+    if (words > 0) return null;
     return { startAbs: lineStartAbs + start, endAbs: lineStartAbs + end };
   }
 
@@ -387,6 +394,9 @@ export function resolveWordTextObjectRange(
     end = extendRun(end);
     words--;
   }
+  // The count reached past the last word: no-op (nvim preserves the register,
+  // e.g. `2daw` on the final word) instead of deleting whatever was collected.
+  if (words > 0) return null;
 
   if (classAt(end) === 0) {
     end = extendRun(end); // trailing whitespace
