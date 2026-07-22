@@ -60,6 +60,54 @@ const EDIT_PARITY_CASES: EditParityCase[] = [
     },
   },
   {
+    name: "X deletes the char before the cursor and lands where it began",
+    initial: { text: "abcd", cursor: { line: 0, col: 2 } },
+    keys: ["X"],
+    expected: {
+      text: "acd",
+      cursor: { line: 0, col: 1 },
+      mode: "normal",
+      register: "b",
+    },
+  },
+  {
+    name: "2X deletes two chars before the cursor",
+    initial: { text: "abcd", cursor: { line: 0, col: 3 } },
+    keys: ["2", "X"],
+    expected: {
+      text: "ad",
+      cursor: { line: 0, col: 1 },
+      mode: "normal",
+      register: "bc",
+    },
+  },
+  {
+    name: "5X clamps the count at the start of the line",
+    initial: { text: "abcd", cursor: { line: 0, col: 2 } },
+    keys: ["5", "X"],
+    expected: {
+      text: "cd",
+      cursor: { line: 0, col: 0 },
+      mode: "normal",
+      register: "ab",
+    },
+  },
+  {
+    name: "X at column 0 is a no-op that preserves the register",
+    initial: {
+      text: "abc",
+      cursor: { line: 0, col: 0 },
+      register: "keep",
+    },
+    keys: ["X"],
+    expected: {
+      text: "abc",
+      cursor: { line: 0, col: 0 },
+      mode: "normal",
+      register: "keep",
+    },
+  },
+  {
     name: "s changes one char after insertion",
     initial: { text: "abcdef", cursor: { line: 0, col: 2 } },
     keys: ["s", "X", ESC],
