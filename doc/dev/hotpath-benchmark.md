@@ -102,8 +102,12 @@ From a clean checkout of this branch:
 node --import tsx/esm script/hotpath-compare.ts
 
 # base: the commit before dot-repeat landed, checked out *nested* under this
-# checkout so Node resolves this checkout's node_modules with no reinstall
-base="$(git rev-list -1 --grep='add dot-repeat' HEAD)~1"
+# checkout so Node resolves this checkout's node_modules with no reinstall.
+# Grep the feat subject specifically — this doc's own commit subject also
+# contains "add dot-repeat", so a looser --grep='add dot-repeat' resolves to
+# *this* commit's parent (a build that already has the recording) and yields a
+# bogus near-zero delta.
+base="$(git rev-list -1 --grep='feat(repeat): add dot-repeat' HEAD)~1"
 git worktree add .tmp/base-checkout "$base"
 PIVIM_ENTRY=.tmp/base-checkout/index.ts \
   node --import tsx/esm script/hotpath-compare.ts
