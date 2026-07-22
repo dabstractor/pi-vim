@@ -135,6 +135,7 @@ const REPEATABLE_COMMAND_START_KEYS = new Set([
   "S",
   "s",
   "x",
+  "X",
 ]);
 // Normal-mode commands that must never run while a visual selection is live.
 // They are swallowed instead of falling through to the normal-mode dispatch.
@@ -2333,6 +2334,7 @@ export class ModalEditor extends CustomEditor {
 
       const supportsCountedStandaloneEdit =
         data === "x" ||
+        data === "X" ||
         data === "r" ||
         data === "s" ||
         data === "S" ||
@@ -2636,6 +2638,9 @@ export class ModalEditor extends CustomEditor {
         break;
       case "x":
         this.cutCharUnderCursor(true);
+        break;
+      case "X":
+        this.cutCharsBeforeCursor();
         break;
       case "j":
         this.moveCursorVertically(1);
@@ -3301,6 +3306,28 @@ export class ModalEditor extends CustomEditor {
       const { line, col } = this.getCurrentLineAndCol();
       if (line && col >= line.length) this.moveCursorBy(-1);
     }
+  }
+
+  // Vim `X`: delete up to {count} graphemes before the cursor on the current
+  // line, clamping at column 0; a cursor already at column 0 is a no-op.
+  private cutCharsBeforeCursor(): void {
+    const count = Math.max(1, Math.min(MAX_COUNT, this.takeTotalCount(1)));
+    const cursor = this.getCursor();
+    if (cursor.col <= 0) return;
+    const line = this.getLines()[cursor.line] ?? "";
+    const segments = getLineGraphemes(line);
+    const before = segments.filter((segment) => segment.end <= cursor.col);
+    if (before.length === 0) return;
+    const take = Math.min(count, before.length);
+    const start = before[before.length - take].start;
+    const end = before[before.length - 1].end;
+    const lineStartAbs = this.getAbsoluteIndex(cursor.line, 0);
+    const text = this.getText();
+    this.writeToRegister(line.slice(start, end));
+    this.replaceTextInBuffer(
+      text.slice(0, lineStartAbs + start) + text.slice(lineStartAbs + end),
+      lineStartAbs + start,
+    );
   }
 
   private cutToEndOfLine(): void {

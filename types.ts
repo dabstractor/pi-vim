@@ -21,6 +21,7 @@ export const NORMAL_KEYS: Record<string, string | null> = {
   "0": "\x01", // line start
   $: null, // line end
   x: null, // delete char (custom clipboard handling)
+  X: null, // delete char before cursor (custom clipboard handling)
   D: null, // delete to end of line (custom clipboard handling)
   C: null, // change to end of line (delete to end + insert mode)
   S: null, // substitute line (delete line content + insert mode)

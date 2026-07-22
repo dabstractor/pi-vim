@@ -6036,6 +6036,49 @@ describe("single-key edits — x / s / S / D / C", () => {
     assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
   });
 
+  it("X deletes the char before the cursor and lands where it began", () => {
+    const { editor } = createEditorWithSpy("abcd");
+
+    sendKeys(editor, ["l", "l", "X"]);
+
+    assert.equal(editor.getText(), "acd");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("X at column 0 is a no-op", () => {
+    const { editor } = createEditorWithSpy("abc");
+
+    sendKeys(editor, ["X"]);
+
+    assert.equal(editor.getText(), "abc");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
+  });
+
+  it("X deletes a whole grapheme before the cursor", () => {
+    const { editor } = createEditorWithSpy("a😀b");
+
+    setInternalCursor(editor, 3);
+    sendKeys(editor, ["X"]);
+
+    assert.equal(editor.getText(), "ab");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("X: register written correctly", () => {
+    const { editor, clipboardWrites } = createEditorWithSpy("hello");
+    sendKeys(editor, ["l", "X"]);
+    assert.deepEqual(clipboardWrites, ["h"]);
+  });
+
+  it("X is dot-repeatable", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["$", "X", "."]);
+
+    assert.equal(editor.getText(), "abcf");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 3 });
+  });
+
   it("s: deletes char under cursor, enters insert mode", () => {
     const { editor } = createEditorWithSpy("hello");
     sendKeys(editor, ["s"]);
@@ -6236,6 +6279,26 @@ describe("Universal Counts: Edits and Put", () => {
 
     assert.equal(editor.getText(), "def");
     assert.equal(editor.getRegister(), "abc");
+  });
+
+  it("2X deletes two chars before the cursor", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["l", "l", "l", "2", "X"]);
+
+    assert.equal(editor.getText(), "adef");
+    assert.equal(editor.getRegister(), "bc");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 1 });
+  });
+
+  it("9X clamps at the line start", () => {
+    const { editor } = createEditorWithSpy("abcdef");
+
+    sendKeys(editor, ["l", "l", "9", "X"]);
+
+    assert.equal(editor.getText(), "cdef");
+    assert.equal(editor.getRegister(), "ab");
+    assert.deepEqual(editor.getCursor(), { line: 0, col: 0 });
   });
 
   it("2x near EOL deletes only available chars", () => {

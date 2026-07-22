@@ -242,11 +242,13 @@ ends like `d$`). `j`, `k`, `G`, and counted `cc` are unsupported and cancel.
 
 #### single-key edits
 
-A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
+A `{count}` prefix is supported for `x`, `X`, `p`, `P`. Maximum: `9999`.
 
 | key | action |
 |---|---|
 | `x` | Delete char under cursor (no-op at/past EOL) |
+| `X` | Delete char before cursor (no-op at column 0) |
+| `{count}X` | Delete `{count}` chars before cursor, clamping at line start |
 | `{count}x` | Delete `{count}` chars |
 | `s` | Delete char under cursor + Insert mode |
 | `S` | Delete line content + Insert mode |
