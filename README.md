@@ -387,7 +387,18 @@ Default-equivalent `settings.json`:
 
 `false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`; a mode you do set is intentionally painted over it, even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
 
-The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. For example, `"modeColors": { "insert": "borderMuted" }` restores an always-muted insert border — insert then paints muted even with thinking raised — while every unconfigured mode still tracks the host border.
+The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. Note that `"inherit"` is a value of `syncBorderColorWithMode`, not a color token — putting it inside `modeColors` does nothing. A complete example:
+
+```json
+{
+  "piVim": {
+    "syncBorderColorWithMode": "inherit",
+    "modeColors": { "insert": "borderMuted" }
+  }
+}
+```
+
+This restores an always-muted insert border — insert paints muted even with thinking raised — while every unconfigured mode (normal, visual, ex) tracks the host border whenever it is non-neutral.
 
 ### modeColors
 
