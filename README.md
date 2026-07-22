@@ -1,72 +1,46 @@
 # pi-vim
 
-Vim muscle-memory inside Pi's input prompt. Type your message in insert mode, hit `Esc`, and the prompt becomes a modal editor: motions, operators, counts, text objects, visual mode, dot-repeat, and vim-change-scoped undo — plus a bridge that runs Pi's own commands and shell commands straight from the ex line. Zero dependencies, and word motions stay sub-µs on long input.
-
-![pi-vim modal editing in Pi's input prompt, mode shown bottom-right with a mode-colored border](doc/asset/hero.gif)
-<!-- recording pending: Esc into NORMAL, a few motions/edits, mode indicator and border tracking the mode -->
-
-It covers the high-frequency 90% of the vim command surface for a REPL prompt; out-of-scope boundaries (block visual, macros, search, ex semantics) are documented below rather than half-built.
-
-## highlights
-
-### `:!cmd` — run a shell command without leaving the prompt
-
-From normal mode, `:!ls` runs `ls` in Pi's shell exactly as if you typed `!ls` and pressed `Enter`; `:!!cmd` runs it excluded from context. Your composed prompt is snapshotted before the command and restored after, so a dispatch never eats your draft.
-
-![running :!ls from the prompt and getting shell output without losing the draft](doc/asset/ex-shell-cmd.gif)
-<!-- recording pending: type a draft, :!ls, output appears, draft is intact -->
-
-### the pi-command bridge — Pi's slash commands from the ex line
-
-`:tree` runs `/tree`, `:model opus` runs `/model opus` — any builtin, extension, skill, or prompt command Pi knows, dispatched from the ex line without opening the `/` palette. Quit names (`:q`, `:qa`, …) resolve first, reserved vim names are held, and an unknown name warns instead of reaching the LLM as a message.
-
-### one `u` per change — vim-change-scoped undo
-
-Undo is scoped to whole vim changes, not host keystrokes: a complete insert session or a change command (`cw`, `3dw`, `viwd`, `p`, `o`, `r`, …) collapses to a single unit, so one `u` reverts one change and one `<C-r>` redoes it. A `.` dot-repeat is its own unit, and `u` / `<C-r>` are exact inverses.
-
-![one u reverting a whole cw change in a single step](doc/asset/undo-one-change.gif)
-<!-- recording pending: cw...Esc to change a word, then a single u restoring it whole -->
-
-### `.` — dot-repeat
-
-`.` replays the last change — `x`, `dw`, `cw…Esc`, `p`, `J`, an `i…Esc` insert run, and more — and `{count}.` replays it with a new count. Motions and yanks never overwrite the stored change, so `.` always repeats the last edit you actually made.
-
-![dot-repeating a change across several lines](doc/asset/dot-repeat.gif)
-<!-- recording pending: make a change, then . . . repeating it down the buffer -->
-
-### visual mode
-
-`v` starts a character-wise selection and `V` a line-wise one, anchored where you press the key; every normal-mode motion resizes it and counts work (`v2ld`, `V2jd`). Operate with `d` / `x`, `y`, `c` / `s`, or the line-forcing `D` / `X` / `Y` / `C` / `S`.
-
-![selecting with v and V then operating on the selection](doc/asset/visual-mode.gif)
-<!-- recording pending: v to extend a selection, d to delete; V to grab lines, y to yank -->
-
-### mode-aware borders
-
-Opt in with `syncBorderColorWithMode` to tint Pi's input border per mode. `"inherit"` keeps Pi's thinking-level signal intact: a mode you configure explicitly is painted even while thinking is active, while an unconfigured mode defers to a non-neutral host border. The mode indicator (`INSERT` / `NORMAL` / `EX`) always shows bottom-right, theme-colored and configurable.
-
-![the input border changing color as the editor switches between insert, normal, and visual](doc/asset/mode-borders.gif)
-<!-- recording pending: border color tracking INSERT/NORMAL/VISUAL, and deferring to a raised thinking level -->
-
-## install
+Vim in Pi's prompt. Draft in INSERT, edit in NORMAL, select in VISUAL — and run `:!git status` from the middle of a prompt without losing a word of your draft.
 
 ```bash
 pi install npm:pi-vim
 ```
 
-Restart Pi after install. Requires `@earendil-works/pi-tui >= 0.74.0`. With DECSCUSR support the cursor shape follows the mode; otherwise a software cursor remains.
+Restart Pi after install; requires `@earendil-works/pi-tui >= 0.74.0`.
+
+[quickstart](#30-second-quickstart) · [key reference](#full-reference) · [settings](#settings-reference) · [limits](#limits-and-vim-differences)
+
+<!-- gif slot (recording pending): hero — Esc into NORMAL, a few motions and edits, footer label and border tracking the mode -->
+
+## highlights
+
+### the everyday vim, in all four modes
+
+Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. Motions (`w`, `f{char}`, `%`, `25gg`), operators with counts (`3dw`, `ci"`, `ya{`), text objects, and `.` to repeat the last change. Undo is scoped like vim's: one `u` reverts one whole change — an insert session, a `cw`, a paste — and `<C-r>` brings it back. The boundaries (block visual, macros, search, vim ex semantics) are documented below rather than half-built.
+
+<!-- gif slot (recording pending): a change, then . . . down the buffer, then u / <C-r> -->
+
+### an ex line that talks to Pi
+
+`:tree` runs Pi's `/tree` without leaving your half-written prompt; `:model opus` switches models; every builtin, extension, skill, and prompt command dispatches the same way. A leading `!` reaches Pi's shell — `:!ls` runs `ls`, `:!!cmd` keeps it out of context. The draft is snapshotted before every dispatch and restored after, so a command never eats your prompt.
+
+<!-- gif slot (recording pending): half-written draft, :!ls, shell output appears, draft intact -->
+
+### and the comfort layer
+
+Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the footer always shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX`, and mode-colored borders are one setting away — including an `"inherit"` mode that defers to whatever color the host is already showing.
 
 ## 30-second quickstart
 
 Try this on multi-line input:
 
 ```text
-Esc        # NORMAL mode
-3gg        # jump to absolute line 3
-2dw        # delete two words
-u          # undo
-<C-r>      # redo last undone edit (safe no-op when empty)
-2}         # jump two paragraphs forward
+Esc            # NORMAL mode
+3gg            # jump to absolute line 3
+2dw            # delete two words
+u              # undo
+<C-r>          # redo last undone edit (safe no-op when empty)
+:!git status   # run in Pi's shell; your draft is restored
 ```
 
 Common quick wins:
@@ -123,7 +97,7 @@ Insert-mode shortcuts (stay in Insert mode):
 
 #### ex mini-mode
 
-Quit flows, plus a bridge that runs Pi slash commands and shell commands from the ex line.
+The ex line handles safe quit flows, dispatches known Pi commands, and sends `:!cmd` to Pi's shell.
 
 | key / command | action |
 |---------------|--------|
@@ -231,13 +205,14 @@ Semantics:
 
 #### delete `d{motion}` / `dd`
 
-A `{count}` or dual-count prefix (`{pfx}d{op}{motion}`) is supported for word,
-WORD, char-find, and linewise motions. Maximum total count: `9999`.
+Prefix and operator counts are both supported as `{count}d{count}{motion}` for
+word, WORD, char-find, and linewise motions; the counts multiply and clamp at
+`9999`.
 
 | command | deletes |
 |---|---|
 | `dw` / `de` / `db`; `dW` / `dE` / `dB` | word/WORD motion ranges; `{count}` repeats |
-| `d$` / `d0` / `d^` | To EOL / BOL / first non-whitespace |
+| `d$` / `d0` / `d^`; `{count}d$` | To EOL / BOL / first non-whitespace; a counted `$` spans down through that many line ends |
 | `d_` / `dd`; `d{count}_` / `{count}dd` | Current or counted whole lines |
 | `d{count}j` / `d{count}k` / `dG` | Linewise down/up/to EOF |
 | `df{c}` / `dt{c}` / `dF{c}` / `dT{c}`; `d{count}f{c}` | Char-find ranges |
@@ -249,7 +224,9 @@ WORD, char-find, and linewise motions. Maximum total count: `9999`.
 
 #### change `c{motion}` / `cc`
 
-Same motion and count set as `d`. Deletes text then enters Insert mode.
+Deletes text then enters Insert mode. `c` supports `%`, `_`, char-find,
+word/WORD, text-object, and `0` / `^` / `$` motions (counted `c$` spans line
+ends like `d$`). `j`, `k`, `G`, and counted `cc` are unsupported and cancel.
 
 | command | action |
 |---|---|
@@ -262,7 +239,6 @@ Same motion and count set as `d`. Deletes text then enters Insert mode.
 | `cc` / `c_`; `c{count}_` | Change current or counted whole lines + Insert |
 | `c$` / `c0` / `c^` | Delete to EOL / BOL / first non-whitespace + Insert |
 | `c%` | Change inclusive range through the matching pair target + Insert |
-| … | All `d` motions apply |
 
 #### single-key edits
 
@@ -278,6 +254,13 @@ A `{count}` prefix is supported for `x`, `p`, `P`. Maximum: `9999`.
 | `C` | Delete cursor to EOL + Insert mode |
 | `r{char}` | Replace char under cursor with `{char}` (stays in Normal) |
 | `{count}r{char}` | Replace next `{count}` chars with `{char}` |
+
+#### join lines
+
+| key | action |
+|---|---|
+| `J` / `{count}J` | Join two or `{count}` lines, normalizing boundary whitespace |
+| `gJ` / `{count}gJ` | Join two or `{count}` lines without whitespace normalization |
 
 ---
 
@@ -312,9 +295,9 @@ implemented and cancel the pending operator. Linewise counted yank (`{count}yy`,
 | `{count}p` | Put `{count}` times after cursor |
 | `{count}P` | Put `{count}` times before cursor |
 
-Put reads the OS clipboard first unless the last local register write was not mirrored. Paste text ending in `\n` is line-wise.
+Put normally reads the OS clipboard first, but uses the shadow register when the latest mirror was skipped by policy, is still pending, or failed. Paste text ending in `\n` is line-wise. Repeated puts stop at a 512 KiB payload safety cap; one register payload is always inserted whole.
 
-Cursor placement matches Vim. A line-wise put (`yyp`, `yyP`, or any register ending in `\n`) lands on the **first non-blank** of the **first** pasted line, not the end of the pasted text. A char-wise put lands on the **last** inserted character.
+Cursor placement matches Vim except when the first pasted line is all whitespace, where pi-vim lands at column 0. A line-wise put (`yyp`, `yyP`, or any register ending in `\n`) lands on the **first non-blank** of the **first** pasted line, not the end of the pasted text. A char-wise put lands on the **last** inserted character.
 
 ---
 
@@ -330,9 +313,9 @@ Cursor placement matches Vim. A line-wise put (`yyp`, `yyP`, or any register end
 | `.` | Repeat the last repeatable normal-mode edit/change (for example `x`, `dw`, `cw...Esc`, `p`, `J`, insert entries like `i...Esc`) |
 | `{count}.` | Repeat the last change with `{count}` replacing the stored command count |
 
-One `u` undoes one whole vim change and one `<C-r>` redoes one, matching Neovim: a complete insert session (single- or multi-line, count-prefixed included) collapses to a single unit, and so does each change command (`cw`, `3dw`, `viwd`, `p`, `o`, `r`, …). A `.` dot-repeat is its own unit, separate from the change it repeats, and `u`/`<C-r>` are exact inverses. Count-insert *repeat* (`3i…<Esc>` producing `hihihi`) is out of scope; whatever `3i…<Esc>` types today is still one undo unit.
+One `u` undoes one whole vim change and one `<C-r>` redoes one, matching Neovim: a complete insert session (single- or multi-line, count-prefixed included) is one undo unit, and so is each change command (`cw`, `3dw`, `ved`, `p`, `o`, `r`, …). One `u` reverts it; `<C-r>` restores its buffer text and cursor; each `.` replay is its own unit, separate from the change it repeats. Count-insert *repeat* (`3i…<Esc>` producing `hihihi`) is out of scope; whatever `3i…<Esc>` types today is still one undo unit.
 
-Repeat tracks changes only; motions and yanks do not replace the previous repeatable change. Plain `.` preserves the original command count; `{count}.` uses the new count for that replay.
+Repeat tracks changes only: motions and yanks preserve the stored change, while mutating visual edits deliberately clear it. Plain `.` preserves the original command count; `{count}.` uses the new count for that replay.
 
 Typing done in an implicit insert session is repeatable too: the prompt opens in insert mode and re-enters it after a submit, so the first keystroke records an `i…<Esc>` change even though no `i` was pressed. A submit (`<Enter>`) is never part of the recording, so a later `.` re-types the run but never resubmits.
 
@@ -365,7 +348,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project overrides global for non-executing settings; project `modeColors` replaces global `modeColors` whole, with missing modes defaulting below. `modeChange` is intentionally absent from the default and is read only from the global settings file because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors` (replaced as a whole object, missing modes defaulting below), and `syncBorderColorWithMode`; `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -396,11 +379,11 @@ Default-equivalent `settings.json`:
 
 `exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [pi-command bridge](#pi-command-bridge)); `false` restores a quit-only ex line. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
 
-`exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
+`exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the non-empty composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
 
 ### syncBorderColorWithMode
 
-`false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`, and you never lose the signal; a mode you do set is painted even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
+`false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`; a mode you do set is intentionally painted over it, even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
 
 The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. For example, `"modeColors": { "insert": "borderMuted" }` restores an always-muted insert border — insert then paints muted even with thinking raised — while every unconfigured mode still tracks the host border.
 
@@ -414,9 +397,9 @@ Usual/safest tokens: `accent`, `border`, `borderAccent`, `borderMuted`, `success
 
 ### modeChange
 
-`modeChange`: user-global shell command to run on every transition into the named mode. Both keys are optional. The command runs asynchronously via the system shell, stdio is discarded, failures are silenced, and a hung command is timed out so editing never blocks or breaks. If mode changes happen while a hook command is still running, pi-vim keeps only the latest pending command. Hooks fire only on actual transitions: not on the initial mode, not on EX entry/exit (EX is a sub-state of normal), and not on no-op `Esc` from normal. Because this is arbitrary shell, project `.pi/settings.json` values are ignored. pi-vim also emits `pi-vim:mode-change` on `pi.events` with `{ mode, previousMode }` for other extensions.
+`modeChange`: user-global shell commands run on mode transitions. `insert` runs on every transition into Insert; `normal` runs on every transition into a non-Insert editing mode — Normal, Visual, and V-Line alike. Both keys are optional. The command runs asynchronously via the system shell, stdio is discarded, failures are silenced, and a hung command is timed out so editing never blocks or breaks. If mode changes happen while a hook command is still running, pi-vim keeps only the latest pending command. Hooks fire only on actual transitions: not on the initial mode, not on EX entry/exit (EX is a sub-state of normal), and not on no-op `Esc` from normal. Because this is arbitrary shell, project `.pi/settings.json` values are ignored. pi-vim also emits `pi-vim:mode-change` on `pi.events` with `{ mode, previousMode }` for other extensions.
 
-A typical use is automatic IME switching. Point `modeChange` at any CLI that switches your input method — with no args it prints your current IME id, which you then plug into the config:
+A typical use is automatic IME switching. Point `modeChange` at any CLI that switches your input method. For example, `im-select` prints your current IME id when run with no arguments; plug the ids into the config (another tool has its own syntax):
 
 ```json
 {
@@ -447,13 +430,11 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 
 ---
 
-## known differences from full Vim
+## limits and vim differences
 
 | area | this extension | full Vim |
 |---|---|---|
-| `$` motion | Moves past the last char (readline `Ctrl+E`) | Moves to the last char |
-| `w` / `e` / `b` + `W` / `E` / `B` | Cross-line for both `word` and `WORD` motions | Cross-line |
-| `0` / `$` operators | Exclusive of the anchor col | `0` is inclusive of col 0 |
+| Visual `$` motion | Moves to the visible EOL position | Moves to the last character |
 | Line-wise put onto an all-whitespace first line | Lands at col 0 (shares the `^`/`I` all-whitespace behavior) | `^` lands on the last char of the line |
 | Undo / redo | Vim-change-scoped: one `u` reverts one whole vim change (insert session or change command), one `<C-r>` redoes it, and `.` is its own unit; a linear undo/redo list, no undo tree | Full per-change undo tree with `g+`/`g-`/`:earlier` time-travel |
 | Visual mode | `v` and `V` with `d`/`x`, `y`, `c`/`s` and the line-forcing `D`/`X`/`Y`/`C`/`S`; no `<C-v>`, no visual `p`/`r`/`J`/`~`/`>`/`<`/`gv`, no text objects, no `{count}v` | `v`, `V`, `<C-v>` with the full operator set |
@@ -463,43 +444,30 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
-| Registers / macros / search | Not implemented | Supported |
+| Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
 ---
 
-## out of scope
+Also out of scope (not already covered by a row above):
 
-Explicitly deferred:
-
-- Block visual mode (`<C-v>`)
-- Visual selection highlighting in the rendered prompt
-- Visual-mode `p`, `P`, `r`, `J`, `~`, `>`, `<`, `gv`, and `{count}v` selection sizing
-- Dot-repeat of a visual-mode operator
-- Tag text objects (`it`, `at`)
-- Paragraph/sentence text objects (`ip`, `ap`, `is`, `as`)
-- Angle bracket text objects (`i<`, `a<`) or angle-bracket `%` matching
-- Visual-mode text-object selection
-- Quote matching via `%`, parser-aware delimiter matching, matchit-style matching, and mixed-delimiter structural validation
-- Delimited-object counts (`d2i"`, `2ci(`, `y2a{`)
-- Named registers (`"a`, `"b`, …), macros (`q{char}`, `@{char}`)
-- Vim ex-command semantics (`:s`, `:g`, `:w`, `:r`, …) — those names are reserved, not implemented; the ex line only bridges to Pi slash commands
+- Tag (`it`, `at`), paragraph/sentence (`ip`, `ap`, `is`, `as`), and angle-bracket (`i<`, `a<`) text objects
+- Vim ex-command semantics (`:s`, `:g`, `:w`, `:r`, …) — those names are reserved; the ex line supports quit flows, known Pi commands, and `:!cmd`, not vim ex semantics
 - Ex-line completion of Pi command names, and `::name` force-dispatch of a reserved name
-- Search (`/`, `?`, `n`, `N`)
 - Replace mode (`R`) — only `r{char}` is supported
-- Count prefix beyond currently supported motions, including `{count}%` percent-of-file jumps
-- No insert-mode `<C-r>` expansion, no cross-session redo persistence
-- No undo **tree** or time-travel (`g+`, `g-`, `:earlier`, `:later`); pi-vim keeps a linear undo/redo list
-- No count-insert **repeat** (`3i…<Esc>` producing `hihihi`); a count-prefixed insert still undoes as one unit
-- No upstream `pi-tui` redo prerequisite
+- Insert-mode `<C-r>` register expansion; cross-session redo persistence
 - Window / tab / buffer management, plugin ecosystem compatibility
 
 ---
 
-## wrapping pi-vim
+## development and integration
 
-Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). `getMode()` returns `normal`, `insert`, `visual`, or `visual-line`, so a wrapper can tell the two visual sub-modes apart. Inverse order, insert delegates, and generic composition are unsupported.
+### wrapping pi-vim
+
+- Supported extension order: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors.
+- Wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, and reads (`getLines`, `getCursor`, `getMode()`). `getMode()` returns `normal`, `insert`, `visual`, or `visual-line`, so a wrapper can tell the two visual sub-modes apart.
+- Inverse order, insert delegates, and generic composition are unsupported.
 
 Smoke:
 
@@ -510,7 +478,7 @@ pi -e ./index.ts -e ../../../pi-image-attachments/index.ts
 
 Check: insert text; add/paste image path; see `[Image #1]`; submit text+image stripped; switch INSERT/NORMAL.
 
-## contributor setup
+### contributor setup
 
 Hooks install with `npm install` after cloning. To wire them explicitly:
 
