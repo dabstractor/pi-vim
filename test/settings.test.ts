@@ -3,13 +3,17 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_EX_COMMAND_SETTINGS,
+  readPiVimBorderSync,
   readPiVimBorderSyncSetting,
   readPiVimClipboardMirrorSetting,
   readPiVimExCommandSetting,
   readPiVimGlobalExCommandSetting,
+  readPiVimLabelSync,
   readPiVimModeChange,
   readPiVimModeColors,
   resolveExCommandSettings,
+  resolveSurfaceSyncMaps,
+  type SurfaceSyncMap,
 } from "../settings.js";
 
 describe("piVim mode color settings reader", () => {
@@ -235,6 +239,134 @@ describe("piVim border sync settings reader", () => {
         { piVim: { syncBorderColorWithMode: "false" } },
       ),
       undefined,
+    );
+  });
+});
+
+describe("piVim border/label sync map readers", () => {
+  it("returns undefined when the maps are missing", () => {
+    assert.equal(readPiVimBorderSync(undefined, undefined), undefined);
+    assert.equal(readPiVimBorderSync({ piVim: {} }, { piVim: {} }), undefined);
+    assert.equal(readPiVimLabelSync(undefined, undefined), undefined);
+  });
+
+  it("reads a partial borderSync map, defaulting missing modes to host", () => {
+    assert.deepEqual(
+      readPiVimBorderSync({ piVim: { borderSync: { visual: "mode" } } }, {}),
+      { insert: "host", normal: "host", visual: "mode", ex: "host" },
+    );
+  });
+
+  it("reads a partial labelSync map, defaulting missing modes to mode", () => {
+    assert.deepEqual(
+      readPiVimLabelSync({ piVim: { labelSync: { insert: "thinking" } } }, {}),
+      { insert: "thinking", normal: "mode", visual: "mode", ex: "mode" },
+    );
+  });
+
+  it("drops invalid enum values back to the surface default", () => {
+    assert.deepEqual(
+      readPiVimBorderSync(
+        { piVim: { borderSync: { insert: "bogus", normal: "thinking" } } },
+        {},
+      ),
+      { insert: "host", normal: "thinking", visual: "host", ex: "host" },
+    );
+  });
+
+  it("returns undefined when no entry is valid", () => {
+    assert.equal(
+      readPiVimBorderSync({ piVim: { borderSync: { insert: "bogus" } } }, {}),
+      undefined,
+    );
+    assert.equal(
+      readPiVimBorderSync({ piVim: { borderSync: "nope" } }, {}),
+      undefined,
+    );
+  });
+
+  it("lets a project borderSync override global as a whole map", () => {
+    assert.deepEqual(
+      readPiVimBorderSync(
+        { piVim: { borderSync: { insert: "mode", normal: "mode" } } },
+        { piVim: { borderSync: { visual: "thinking" } } },
+      ),
+      { insert: "host", normal: "host", visual: "thinking", ex: "host" },
+    );
+  });
+
+  it("treats an invalid project borderSync as an override, not a fallback", () => {
+    assert.equal(
+      readPiVimBorderSync(
+        { piVim: { borderSync: { insert: "mode" } } },
+        { piVim: { borderSync: null } },
+      ),
+      undefined,
+    );
+  });
+});
+
+describe("piVim surface sync resolver", () => {
+  const HOST: SurfaceSyncMap = {
+    insert: "host",
+    normal: "host",
+    visual: "host",
+    ex: "host",
+  };
+  const MODE: SurfaceSyncMap = {
+    insert: "mode",
+    normal: "mode",
+    visual: "mode",
+    ex: "mode",
+  };
+  const THINKING: SurfaceSyncMap = {
+    insert: "thinking",
+    normal: "thinking",
+    visual: "thinking",
+    ex: "thinking",
+  };
+
+  it("defaults both maps when nothing is set", () => {
+    assert.deepEqual(resolveSurfaceSyncMaps({}), {
+      borderSync: HOST,
+      labelSync: MODE,
+    });
+  });
+
+  it("maps legacy false to the defaults", () => {
+    assert.deepEqual(
+      resolveSurfaceSyncMaps({ syncBorderColorWithMode: false }),
+      {
+        borderSync: HOST,
+        labelSync: MODE,
+      },
+    );
+  });
+
+  it("maps legacy true to all-mode borders and a default label", () => {
+    assert.deepEqual(
+      resolveSurfaceSyncMaps({ syncBorderColorWithMode: true }),
+      {
+        borderSync: MODE,
+        labelSync: MODE,
+      },
+    );
+  });
+
+  it("maps legacy inherit to all-thinking on both surfaces", () => {
+    assert.deepEqual(
+      resolveSurfaceSyncMaps({ syncBorderColorWithMode: "inherit" }),
+      { borderSync: THINKING, labelSync: THINKING },
+    );
+  });
+
+  it("lets a present map win over the legacy key per surface", () => {
+    assert.deepEqual(
+      resolveSurfaceSyncMaps({
+        borderSync: MODE,
+        syncBorderColorWithMode: "inherit",
+      }),
+      { borderSync: MODE, labelSync: THINKING },
     );
   });
 });

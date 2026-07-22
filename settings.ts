@@ -19,15 +19,33 @@ export type ExCommandSettings = {
 
 export type BorderSyncMode = boolean | "inherit";
 
+// Per-surface paint policy for a single mode:
+//   - "mode"     always paint that mode's color;
+//   - "host"     always show the host's current border color;
+//   - "thinking" show the host color while its border is away from the neutral
+//                resting default, otherwise paint the mode color.
+export type SurfaceSync = "mode" | "host" | "thinking";
+export type SurfaceSyncMap = {
+  insert: SurfaceSync;
+  normal: SurfaceSync;
+  visual: SurfaceSync;
+  ex: SurfaceSync;
+};
+
 export type PiVimSettings = {
   clipboardMirror?: unknown;
   exCommand?: unknown;
   globalExCommand?: unknown;
   modeColors?: ModeColorSettings;
   modeChange?: ModeChangeSettings;
-  // `false` (default) leaves Pi's border untouched; `true` always recolors per
-  // mode; `"inherit"` recolors only when the border is Pi's neutral "thinking
-  // off" color and otherwise defers to whatever the host is showing.
+  // Per-mode paint policy for Pi's input border. Default: every mode "host".
+  borderSync?: SurfaceSyncMap;
+  // Per-mode paint policy for pi-vim's footer mode label. Default: "mode".
+  labelSync?: SurfaceSyncMap;
+  // Deprecated, never-released alias superseded by borderSync/labelSync; still
+  // accepted and translated in `resolveSurfaceSyncMaps`. `false`/absent → both
+  // maps at their defaults; `true` → borderSync all "mode"; the never-released
+  // `"inherit"` → both maps all "thinking".
   syncBorderColorWithMode?: BorderSyncMode;
 };
 
@@ -59,6 +77,36 @@ function colors(v: unknown) {
     if (T.test(t)) r[k] = t;
   }
   return Object.keys(r)[0] ? r : undefined;
+}
+
+const BORDER_SYNC_DEFAULT: SurfaceSync = "host";
+const LABEL_SYNC_DEFAULT: SurfaceSync = "mode";
+
+// Validates a per-mode paint-policy map. Like `colors`, a project map is a
+// whole-setting override: missing or invalid entries fall back to the surface
+// default (not to the global map). Returns undefined when no valid entry is
+// present so the caller can defer to the legacy key.
+function surfaceMap(v: unknown, dflt: SurfaceSync): SurfaceSyncMap | undefined {
+  if (!rec(v)) return;
+  const r: SurfaceSyncMap = {
+    insert: dflt,
+    normal: dflt,
+    visual: dflt,
+    ex: dflt,
+  };
+  let any = false;
+  for (const k of C) {
+    const x = v[k];
+    if (x === "mode" || x === "host" || x === "thinking") {
+      r[k] = x;
+      any = true;
+    }
+  }
+  return any ? r : undefined;
+}
+
+function fill(value: SurfaceSync): SurfaceSyncMap {
+  return { insert: value, normal: value, visual: value, ex: value };
 }
 
 function modeChange(v: unknown): ModeChangeSettings | undefined {
@@ -167,6 +215,52 @@ export function readPiVimBorderSyncSetting(
   return read(get(g, "syncBorderColorWithMode"));
 }
 
+export function readPiVimBorderSync(
+  g: unknown,
+  p: unknown,
+): SurfaceSyncMap | undefined {
+  // Project settings are a whole-setting override (as with modeColors): a
+  // present project value wins even if invalid, so its global counterpart never
+  // leaks through.
+  const v = get(p, "borderSync");
+  if (v !== M) return surfaceMap(v, BORDER_SYNC_DEFAULT);
+  return surfaceMap(get(g, "borderSync"), BORDER_SYNC_DEFAULT);
+}
+
+export function readPiVimLabelSync(
+  g: unknown,
+  p: unknown,
+): SurfaceSyncMap | undefined {
+  const v = get(p, "labelSync");
+  if (v !== M) return surfaceMap(v, LABEL_SYNC_DEFAULT);
+  return surfaceMap(get(g, "labelSync"), LABEL_SYNC_DEFAULT);
+}
+
+// Collapses the two new per-mode maps and the deprecated legacy key into the
+// two full maps pi-vim paints with. A present new map wins over the legacy key
+// for its surface; otherwise the legacy value is translated:
+//   - `true`      → borderSync all "mode"        (label stays default "mode")
+//   - `"inherit"` → borderSync/labelSync all "thinking"
+//   - `false`/absent → both maps at their defaults ("host" / "mode")
+export function resolveSurfaceSyncMaps(settings: {
+  borderSync?: SurfaceSyncMap;
+  labelSync?: SurfaceSyncMap;
+  syncBorderColorWithMode?: BorderSyncMode;
+}): { borderSync: SurfaceSyncMap; labelSync: SurfaceSyncMap } {
+  const legacy = settings.syncBorderColorWithMode;
+  const borderSync =
+    settings.borderSync ??
+    (legacy === true
+      ? fill("mode")
+      : legacy === "inherit"
+        ? fill("thinking")
+        : fill(BORDER_SYNC_DEFAULT));
+  const labelSync =
+    settings.labelSync ??
+    (legacy === "inherit" ? fill("thinking") : fill(LABEL_SYNC_DEFAULT));
+  return { borderSync, labelSync };
+}
+
 function disk(cwd: string): PiVimSettings {
   const s = SettingsManager.create(cwd),
     g = s.getGlobalSettings(),
@@ -177,6 +271,8 @@ function disk(cwd: string): PiVimSettings {
     globalExCommand: readPiVimGlobalExCommandSetting(g, p),
     modeColors: readPiVimModeColors(g, p),
     modeChange: readPiVimModeChange(g, p),
+    borderSync: readPiVimBorderSync(g, p),
+    labelSync: readPiVimLabelSync(g, p),
     syncBorderColorWithMode: readPiVimBorderSyncSetting(g, p),
   };
 }

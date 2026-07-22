@@ -219,9 +219,20 @@ const THRESHOLDS = {
   // its net prose growth counts. Measured packed 55500 B, unpacked 220633 B.
   // Budgets bumped 55000 -> 56000 and 218500 -> 221500, leaving ~500 B /
   // ~867 B headroom. Files stay at 17.
+  //
+  // borderSync/labelSync redesign: the released explicit-wins "inherit" model
+  // is replaced by two per-mode enum maps ("mode"/"host"/"thinking") over the
+  // border and label surfaces. index.ts swaps the explicit-config resolver for
+  // a shared per-surface resolver plus a trap-skip gate (the all-default case
+  // installs no border trap); settings.ts adds the two whole-map readers and
+  // the legacy-key resolver; README's border section is rewritten to the three
+  // values, the defaults, and two worked examples, and the settings block spells
+  // out the default-equivalent maps. Measured packed 56735 B, unpacked 225596 B.
+  // Budgets bumped 56000 -> 57300 and 221500 -> 226300, leaving ~565 B / ~704 B
+  // headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 56000,
-  maxUnpackedSize: 221500,
+  maxSize: 57300,
+  maxUnpackedSize: 226300,
 } as const;
 
 function compareStrings(a: string, b: string): number {

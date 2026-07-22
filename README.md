@@ -28,7 +28,7 @@ Hit `Esc` and the prompt is a modal editor: INSERT, NORMAL, VISUAL, and V-LINE. 
 
 ### and the comfort layer
 
-Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the footer always shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX`, and mode-colored borders are one setting away — including an `"inherit"` mode that defers to whatever color the host is already showing.
+Yanks and deletes mirror to the OS clipboard (configurable), the cursor shape follows the mode on DECSCUSR terminals, the footer always shows `INSERT` / `NORMAL` / `VISUAL` / `V-LINE` / `EX`, and mode-colored borders and labels are one setting away — each mode choosing whether to paint its own color, show the host's border, or defer only while the host is thinking.
 
 ## 30-second quickstart
 
@@ -350,7 +350,7 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ## settings reference
 
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors` (replaced as a whole object, missing modes defaulting below), and `syncBorderColorWithMode`; `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project settings override global for `clipboardMirror`, `exCommand.piDispatch`, `modeColors`, `borderSync`, and `labelSync` (each replaced as a whole object, missing modes defaulting below); `modeChange` and `exCommand.copyInputToClipboard` are user-global only — `modeChange` because it executes shell commands.
 
 Default-equivalent `settings.json`:
 
@@ -368,7 +368,18 @@ Default-equivalent `settings.json`:
       "visual": "customMessageLabel",
       "ex": "warning"
     },
-    "syncBorderColorWithMode": false
+    "borderSync": {
+      "insert": "host",
+      "normal": "host",
+      "visual": "host",
+      "ex": "host"
+    },
+    "labelSync": {
+      "insert": "mode",
+      "normal": "mode",
+      "visual": "mode",
+      "ex": "mode"
+    }
   }
 }
 ```
@@ -383,22 +394,42 @@ Default-equivalent `settings.json`:
 
 `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the non-empty composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
 
-### syncBorderColorWithMode
+### borderSync and labelSync
 
-`false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`; a mode you do set is intentionally painted over it, even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
+`borderSync` and `labelSync` set a per-mode paint policy for two surfaces: `borderSync` for Pi's input border, `labelSync` for the footer mode label. Each maps the mode keys `insert`, `normal`, `visual`, `ex` to one of three values:
 
-The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. Note that `"inherit"` is a value of `syncBorderColorWithMode`, not a color token — putting it inside `modeColors` does nothing. A complete example:
+| value | effect |
+|---|---|
+| `mode` | always paint that mode's color (from `modeColors`) |
+| `host` | always show the host's current border color |
+| `thinking` | show the host color while its border is away from the resting default, otherwise paint the mode color |
+
+Defaults: every `borderSync` mode is `host`, so Pi's border is left untouched; every `labelSync` mode is `mode`, so the label always carries its mode color. Each map is replaced as a whole object; modes you omit fall back to these defaults.
+
+`thinking` keys on the host border being away from its neutral resting ("thinking off") color, so any non-resting border counts — a raised thinking level, bash-mode's border, or another extension's highlight. Detection is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it leaves the gray `minimal` level alone too.
+
+Paint the visual-mode border with its own color while leaving every other mode on the host:
 
 ```json
 {
   "piVim": {
-    "syncBorderColorWithMode": "inherit",
-    "modeColors": { "insert": "borderMuted" }
+    "borderSync": { "visual": "mode" }
   }
 }
 ```
 
-This restores an always-muted insert border — insert paints muted even with thinking raised — while every unconfigured mode (normal, visual, ex) tracks the host border whenever it is non-neutral.
+Give insert a solid mode color, let normal defer to thinking, and make both mode labels follow the thinking state:
+
+```json
+{
+  "piVim": {
+    "borderSync": { "insert": "mode", "normal": "thinking" },
+    "labelSync": { "insert": "thinking", "normal": "thinking" }
+  }
+}
+```
+
+`syncBorderColorWithMode` is deprecated but still accepted: `false` (or absent) is the defaults; `true` sets `borderSync` to `mode` for every mode; the never-released `"inherit"` sets both `borderSync` and `labelSync` to `thinking` for every mode. A present `borderSync` or `labelSync` wins over it for that surface.
 
 ### modeColors
 
