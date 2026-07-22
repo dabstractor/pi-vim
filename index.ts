@@ -239,10 +239,12 @@ type ModalEditorOptions = {
   // thinking level or another extension's highlight (leave untouched). When
   // omitted, detection is disabled and the mode color is always applied.
   offBorderColor?: ((s: string) => string) | null;
-  // Resolved per-mode tokens (config ?? MODE_COLORS default). Drives the
-  // precedence rule: a "borderMuted" token always wins, even when thinking is
-  // active; any other token defers to the thinking color while it is active.
-  modeColorTokens?: Partial<Record<ModeColorKey, string>>;
+  // The user's raw validated modeColors partial (from readPiVimModeColors),
+  // holding only the modes they explicitly configured. Drives the explicit-wins
+  // precedence: an explicitly configured mode is honored even while the host
+  // border is non-neutral; an unconfigured mode defers to the active thinking
+  // color. Absent/unknown modes fall through to the deferral branch.
+  explicitModeColors?: Partial<Record<ModeColorKey, string>> | null;
   // Reverse-video transform applied to the label. When the label defers to the
   // thinking color it is wrapped with this so it keeps its block styling.
   labelTransform?: ((s: string) => string) | null;
@@ -291,9 +293,10 @@ export class ModalEditor extends CustomEditor {
   // resolver can read the same thinking state the border uses.
   private borderBase: ((s: string) => string) | null = null;
   private borderBaseIsNeutral = true;
-  // Resolved per-mode tokens (config ?? default); the precedence check keys on
-  // the token, not the mode name, so "borderMuted" wins regardless of mode.
-  private modeColorTokens: Partial<Record<ModeColorKey, string>> = {};
+  // Modes the user explicitly configured in piVim.modeColors. The precedence
+  // check keys on membership here: an explicit mode is honored over a
+  // non-neutral host border, an unconfigured mode defers to it.
+  private explicitModes: Set<ModeColorKey> = new Set();
   // Reverse-video transform used by the label, so its defer-to-thinking branch
   // matches the label's usual background-block styling.
   private labelTransform: ((s: string) => string) | null = null;
@@ -343,7 +346,9 @@ export class ModalEditor extends CustomEditor {
     this.labelColorizers = opts?.labelColorizers ?? null;
     this.borderColorizers = opts?.borderColorizers ?? null;
     this.offBorderColor = opts?.offBorderColor ?? null;
-    this.modeColorTokens = opts?.modeColorTokens ?? {};
+    this.explicitModes = new Set(
+      Object.keys(opts?.explicitModeColors ?? {}) as ModeColorKey[],
+    );
     this.labelTransform = opts?.labelTransform ?? null;
     this.installModeBorderColorizer();
   }
@@ -408,11 +413,12 @@ export class ModalEditor extends CustomEditor {
 
   /**
    * Resolve a surface (border or label) color for the active mode under the
-   * precedence: borderMuted > thinking > (borderAccent | other).
-   *   - a borderMuted token always paints the mode color (muted wins, even
-   *     when thinking is ON);
-   *   - otherwise, thinking ON defers to the host's thinking color and
-   *     thinking OFF paints the mode color.
+   * explicit-wins precedence:
+   *   - a mode the user explicitly configured in piVim.modeColors always
+   *     paints its mode color, even while the host border is non-neutral (an
+   *     active thinking level or a foreign highlight);
+   *   - an unconfigured mode defers to that non-neutral host color and paints
+   *     its own color only when the host border is the neutral resting default.
    * `deferWrap` is identity for the border and reverse-video for the label, so
    * a deferred thinking color inherits the surface's normal styling.
    */
@@ -423,11 +429,10 @@ export class ModalEditor extends CustomEditor {
   ): string {
     const mode = this.getActiveMode();
     const modeColorFn = colorizers[mode] ?? ((s: string) => s);
-    const token = this.modeColorTokens[mode];
-    if (token === "borderMuted" || this.borderBaseIsNeutral) {
+    if (this.explicitModes.has(mode) || this.borderBaseIsNeutral) {
       return modeColorFn(text);
     }
-    // Thinking is active and this mode is not muted: defer to the thinking
+    // Unconfigured mode over a non-neutral host border: defer to the host
     // color, wrapped the way this surface normally styles its text.
     const thinking = this.borderBase ?? modeColorFn;
     return deferWrap(thinking(text));
@@ -4093,7 +4098,7 @@ export default function (pi: ExtensionAPI) {
         labelColorizers,
         borderColorizers,
         offBorderColor,
-        modeColorTokens: modeColors,
+        explicitModeColors: piVimSettings.modeColors,
         labelTransform: reverseVideo,
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);

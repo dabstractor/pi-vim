@@ -2917,14 +2917,12 @@ describe("mode color settings", () => {
     ["minimal", "thinkingMinimal"],
     ["high", "thinkingHigh"],
   ] as const) {
-    it(`syncBorderColorWithMode inherit defers to an active thinking level (${levelName})`, async () => {
+    it(`syncBorderColorWithMode inherit: default modes defer to an active thinking level (${levelName})`, async () => {
       const theme = createRecordingTheme();
+      // No mode is explicitly configured, so every mode defers to a non-neutral
+      // host border.
       const restore = setPiVimSettingsReaderForTests(() => ({
-        modeColors: {
-          insert: "insertToken",
-          normal: "normalToken",
-          ex: "exToken",
-        },
+        modeColors: {},
         syncBorderColorWithMode: "inherit",
       }));
 
@@ -2937,9 +2935,9 @@ describe("mode color settings", () => {
         );
 
         // An active thinking level carries a signal pi-vim must not clobber, in
-        // any mode. `minimal` is the critical case: it is a neutral gray, so
-        // only an exact match against the "off" color (not a saturation test)
-        // can tell it apart from the resting default.
+        // any unconfigured mode. `minimal` is the critical case: it is a neutral
+        // gray, so only an exact match against the "off" color (not a saturation
+        // test) can tell it apart from the resting default.
         editor.borderColor = (text: string) => theme.fg(token, text);
         assert.equal(
           editor.borderColor("border"),
@@ -2959,14 +2957,11 @@ describe("mode color settings", () => {
     });
   }
 
-  it("syncBorderColorWithMode inherit defers to another extension's border highlight", async () => {
+  it("syncBorderColorWithMode inherit: a default mode defers to another extension's border highlight", async () => {
     const theme = createRecordingTheme();
+    // insert is left unconfigured, so it defers to any non-neutral host border.
     const restore = setPiVimSettingsReaderForTests(() => ({
-      modeColors: {
-        insert: "insertToken",
-        normal: "normalToken",
-        ex: "exToken",
-      },
+      modeColors: {},
       syncBorderColorWithMode: "inherit",
     }));
 
@@ -2987,14 +2982,12 @@ describe("mode color settings", () => {
     }
   });
 
-  it("syncBorderColorWithMode inherit recolors when the host border returns to neutral", async () => {
+  it("syncBorderColorWithMode inherit: a default insert defers to thinking and follows level changes", async () => {
     const theme = createRecordingTheme();
+    // insert is unconfigured, so its default token (borderMuted) paints only
+    // over a neutral host border and it tracks any active thinking level.
     const restore = setPiVimSettingsReaderForTests(() => ({
-      modeColors: {
-        insert: "insertToken",
-        normal: "normalToken",
-        ex: "exToken",
-      },
+      modeColors: {},
       syncBorderColorWithMode: "inherit",
     }));
 
@@ -3011,8 +3004,8 @@ describe("mode color settings", () => {
       editor.borderColor = off;
       assert.equal(
         editor.borderColor("border"),
-        "<insertToken>border</insertToken>",
-        "neutral border recolored with the mode color",
+        "<borderMuted>border</borderMuted>",
+        "neutral border recolored with the default mode color",
       );
 
       editor.borderColor = high;
@@ -3025,23 +3018,21 @@ describe("mode color settings", () => {
       editor.borderColor = off;
       assert.equal(
         editor.borderColor("border"),
-        "<insertToken>border</insertToken>",
-        "returning to neutral re-applies the mode color",
+        "<borderMuted>border</borderMuted>",
+        "returning to neutral re-applies the default mode color",
       );
     } finally {
       restore();
     }
   });
 
-  it("syncBorderColorWithMode inherit lets a borderMuted mode win over an active thinking level", async () => {
-    // The user's swapped config: insert is the accent mode, normal is muted.
-    // With thinking ON, the muted (normal) mode must still paint muted so the
-    // border visibly changes between modes (the primary complaint), while the
-    // accent (insert) mode still defers to the thinking color.
+  it("syncBorderColorWithMode inherit: an explicit borderMuted insert wins over an active thinking level", async () => {
+    // Explicitly setting insert restores the pre-explicit-wins always-muted
+    // border: even with thinking ON, an explicitly configured insert paints its
+    // color, so the border visibly changes when entering insert.
     const theme = createRecordingTheme();
     const { editor, restore } = await createInheritBorderEditor(theme, {
-      insert: "borderAccent",
-      normal: "borderMuted",
+      insert: "borderMuted",
     });
 
     try {
@@ -3049,15 +3040,16 @@ describe("mode color settings", () => {
 
       assert.equal(
         editor.borderColor("border"),
-        "<thinkingMinimal>border</thinkingMinimal>",
-        "insert (accent) defers to the active thinking level",
+        "<borderMuted>border</borderMuted>",
+        "explicit insert wins over the active thinking level",
       );
 
+      // normal is unconfigured, so it still defers to the active thinking level.
       sendKeys(editor, ["\x1b"]);
       assert.equal(
         editor.borderColor("border"),
-        "<borderMuted>border</borderMuted>",
-        "normal (muted) wins over the active thinking level",
+        "<thinkingMinimal>border</thinkingMinimal>",
+        "unconfigured normal defers to the active thinking level",
       );
     } finally {
       restore();
@@ -3091,13 +3083,14 @@ describe("mode color settings", () => {
     }
   });
 
-  it("syncBorderColorWithMode inherit precedence follows the token, not the mode name", async () => {
-    // Reversed config: insert is now muted, normal is the accent. The same
-    // rule must hold: whichever mode is muted wins, regardless of mode name.
+  it("syncBorderColorWithMode inherit precedence keys on explicit config, not on the token value", async () => {
+    // Only insert is explicitly configured, with a non-muted token. Under
+    // explicit-wins it still beats an active thinking level, while the
+    // unconfigured normal mode defers — so what wins is the explicit entry, not
+    // a particular token value.
     const theme = createRecordingTheme();
     const { editor, restore } = await createInheritBorderEditor(theme, {
-      insert: "borderMuted",
-      normal: "borderAccent",
+      insert: "borderAccent",
     });
 
     try {
@@ -3105,33 +3098,34 @@ describe("mode color settings", () => {
 
       assert.equal(
         editor.borderColor("border"),
-        "<borderMuted>border</borderMuted>",
-        "insert (muted) wins over the active thinking level",
+        "<borderAccent>border</borderAccent>",
+        "explicit insert (accent) wins over the active thinking level",
       );
 
       sendKeys(editor, ["\x1b"]);
       assert.equal(
         editor.borderColor("border"),
         "<thinkingMinimal>border</thinkingMinimal>",
-        "normal (accent) defers to the active thinking level",
+        "unconfigured normal defers to the active thinking level",
       );
     } finally {
       restore();
     }
   });
 
-  it("syncBorderColorWithMode inherit label inherits the thinking color in a non-muted mode", async () => {
+  it("syncBorderColorWithMode inherit: an unconfigured mode's label inherits the thinking color", async () => {
     const theme = createRecordingTheme();
+    // insert is unconfigured (its label defers); normal is explicitly set (its
+    // label wins).
     const { editor, restore } = await createInheritBorderEditor(theme, {
-      insert: "borderAccent",
       normal: "borderMuted",
     });
 
     try {
       editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
 
-      // Insert (accent) label defers: it is colored with the thinking token
-      // and reverse-video wrapped, so it keeps its block styling.
+      // Insert (unconfigured) label defers: it is colored with the thinking
+      // token and reverse-video wrapped, so it keeps its block styling.
       editor.render(80);
       assert.equal(
         theme.fgCalls.at(-1)?.token,
@@ -3145,14 +3139,14 @@ describe("mode color settings", () => {
         "insert label is reverse-video wrapped around the thinking color",
       );
 
-      // Normal (muted) label wins: it stays muted, not the thinking color.
+      // Normal (explicit) label wins: it stays muted, not the thinking color.
       sendKeys(editor, ["\x1b"]);
       theme.fgCalls.length = 0;
       editor.render(80);
       assert.equal(
         theme.fgCalls.at(-1)?.token,
         "borderMuted",
-        "normal label stays muted even with thinking on",
+        "explicit normal label stays muted even with thinking on",
       );
     } finally {
       restore();
@@ -3192,15 +3186,13 @@ describe("mode color settings", () => {
     }
   });
 
-  it("syncBorderColorWithMode inherit applies the same token rule to the visual mode", async () => {
-    // The visual color key follows the same token-based precedence as the
-    // other modes: its default token (customMessageLabel) is not borderMuted,
-    // so a neutral border paints the visual color and an active thinking
-    // level is deferred to.
+  it("syncBorderColorWithMode inherit: a default visual mode defers to an active thinking level", async () => {
+    // visual is left unconfigured, so like any default mode it paints its color
+    // (the customMessageLabel default) over a neutral border and defers to a
+    // non-neutral one.
     const theme = createRecordingTheme();
     const { editor, restore } = await createInheritBorderEditor(theme, {
       insert: "borderAccent",
-      normal: "borderMuted",
     });
 
     try {
@@ -3209,24 +3201,26 @@ describe("mode color settings", () => {
       assert.equal(
         editor.borderColor("border"),
         "<customMessageLabel>border</customMessageLabel>",
-        "visual paints its color when thinking is off",
+        "visual paints its default color when thinking is off",
       );
 
       editor.borderColor = (text: string) => theme.fg("thinkingMinimal", text);
       assert.equal(
         editor.borderColor("border"),
         "<thinkingMinimal>border</thinkingMinimal>",
-        "visual (non-muted) defers to the active thinking level",
+        "unconfigured visual defers to the active thinking level",
       );
     } finally {
       restore();
     }
   });
 
-  it("syncBorderColorWithMode inherit lets a borderMuted visual mode win over thinking", async () => {
+  it("syncBorderColorWithMode inherit: an explicit visual entry wins over an active thinking level", async () => {
+    // A non-muted explicit visual token still wins, proving the rule keys on the
+    // explicit entry rather than on borderMuted.
     const theme = createRecordingTheme();
     const { editor, restore } = await createInheritBorderEditor(theme, {
-      visual: "borderMuted",
+      visual: "borderAccent",
     });
 
     try {
@@ -3234,8 +3228,8 @@ describe("mode color settings", () => {
       sendKeys(editor, ["h", "i", "\x1b", "v"]);
       assert.equal(
         editor.borderColor("border"),
-        "<borderMuted>border</borderMuted>",
-        "visual set to borderMuted wins over the active thinking level",
+        "<borderAccent>border</borderAccent>",
+        "explicit visual wins over the active thinking level",
       );
     } finally {
       restore();

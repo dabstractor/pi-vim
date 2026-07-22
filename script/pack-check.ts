@@ -187,6 +187,13 @@ const THRESHOLDS = {
   // top of the undo-scope and gM features, the stacked package measures
   // packed 53459 B, unpacked 213919 B. Budgets bumped 51000 -> 54000 and
   // 207100 -> 214500, leaving ~541 B / ~581 B headroom. Files stay at 17.
+  //
+  // "inherit" explicit-wins redesign: index.ts swaps the borderMuted-token
+  // precedence for an explicit-config check (an explicitly configured mode
+  // wins over a non-neutral host border; an unconfigured mode defers) and the
+  // README's two "inherit" paragraphs are rewritten to that contract. Measured
+  // packed 53506 B, unpacked 214184 B — both still under the existing budgets,
+  // so they are unchanged, leaving ~494 B / ~316 B headroom. Files stay at 17.
   maxFiles: 17,
   maxSize: 54000,
   maxUnpackedSize: 214500,
