@@ -1902,6 +1902,7 @@ export class ModalEditor extends CustomEditor {
 
     if (pendingOperator === "d") {
       this.deleteRangeByAbsolute(range.startAbs, range.endAbs);
+      this.clampCursorAfterTextObjectDeletion();
       return;
     }
 
@@ -1913,6 +1914,18 @@ export class ModalEditor extends CustomEditor {
 
     if (pendingOperator === "y") {
       this.yankRangeByAbsolute(range.startAbs, range.endAbs);
+    }
+  }
+
+  // After a normal-mode text-object delete whose range ended at EOL, the cursor
+  // is left at the deletion start, which now equals the line length — one past
+  // the last grapheme. nvim clamps back onto the last grapheme; without this a
+  // following `x` no-ops on the phantom column. Mirrors cutCharUnderCursor's
+  // `col >= line.length` clamp, but grapheme-aware.
+  private clampCursorAfterTextObjectDeletion(): void {
+    const { line, col } = this.getCurrentLineAndCol();
+    if (line.length > 0 && col >= line.length) {
+      this.moveCursorToPreviousGraphemeStart();
     }
   }
 

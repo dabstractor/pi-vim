@@ -215,3 +215,38 @@ describe("nvim parity text objects", () => {
     });
   }
 });
+
+// After a text-object delete whose range ends at EOL, nvim clamps the cursor
+// onto the last remaining grapheme rather than leaving it one past the end.
+// pi-vim previously left the cursor on the phantom column, so a following `x`
+// no-oped instead of deleting.
+const EOL_DELETION_CURSOR_CASES: NvimParityCase[] = [
+  {
+    name: "diw on trailing punctuation clamps the cursor back",
+    initial: { text: "foo.", cursor: { line: 0, col: 3 } },
+    keys: ["d", "i", "w"],
+  },
+  {
+    name: "x after a trailing-punctuation diw deletes the last char",
+    initial: { text: "foo.", cursor: { line: 0, col: 3 } },
+    keys: ["d", "i", "w", "x"],
+  },
+  {
+    name: "daw on the trailing word clamps the cursor back",
+    initial: { text: "foo bar", cursor: { line: 0, col: 5 } },
+    keys: ["d", "a", "w"],
+  },
+  {
+    name: "diw on trailing whitespace clamps the cursor back",
+    initial: { text: "foo   ", cursor: { line: 0, col: 4 } },
+    keys: ["d", "i", "w"],
+  },
+];
+
+describe("nvim parity text object cursor after EOL deletion", () => {
+  for (const testCase of EOL_DELETION_CURSOR_CASES) {
+    it(testCase.name, async () => {
+      await assertMatchesNvim(testCase);
+    });
+  }
+});
