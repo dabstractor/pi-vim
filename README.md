@@ -1,6 +1,52 @@
 # pi-vim
 
-Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% command surface.
+Vim muscle-memory inside Pi's input prompt. Type your message in insert mode, hit `Esc`, and the prompt becomes a modal editor: motions, operators, counts, text objects, visual mode, dot-repeat, and vim-change-scoped undo — plus a bridge that runs Pi's own commands and shell commands straight from the ex line. Zero dependencies, and word motions stay sub-µs on long input.
+
+![pi-vim modal editing in Pi's input prompt, mode shown bottom-right with a mode-colored border](doc/asset/hero.gif)
+<!-- recording pending: Esc into NORMAL, a few motions/edits, mode indicator and border tracking the mode -->
+
+It covers the high-frequency 90% of the vim command surface for a REPL prompt; out-of-scope boundaries (block visual, macros, search, ex semantics) are documented below rather than half-built.
+
+## highlights
+
+### `:!cmd` — run a shell command without leaving the prompt
+
+From normal mode, `:!ls` runs `ls` in Pi's shell exactly as if you typed `!ls` and pressed `Enter`; `:!!cmd` runs it excluded from context. Your composed prompt is snapshotted before the command and restored after, so a dispatch never eats your draft.
+
+![running :!ls from the prompt and getting shell output without losing the draft](doc/asset/ex-shell-cmd.gif)
+<!-- recording pending: type a draft, :!ls, output appears, draft is intact -->
+
+### the pi-command bridge — Pi's slash commands from the ex line
+
+`:tree` runs `/tree`, `:model opus` runs `/model opus` — any builtin, extension, skill, or prompt command Pi knows, dispatched from the ex line without opening the `/` palette. Quit names (`:q`, `:qa`, …) resolve first, reserved vim names are held, and an unknown name warns instead of reaching the LLM as a message.
+
+### one `u` per change — vim-change-scoped undo
+
+Undo is scoped to whole vim changes, not host keystrokes: a complete insert session or a change command (`cw`, `3dw`, `viwd`, `p`, `o`, `r`, …) collapses to a single unit, so one `u` reverts one change and one `<C-r>` redoes it. A `.` dot-repeat is its own unit, and `u` / `<C-r>` are exact inverses.
+
+![one u reverting a whole cw change in a single step](doc/asset/undo-one-change.gif)
+<!-- recording pending: cw...Esc to change a word, then a single u restoring it whole -->
+
+### `.` — dot-repeat
+
+`.` replays the last change — `x`, `dw`, `cw…Esc`, `p`, `J`, an `i…Esc` insert run, and more — and `{count}.` replays it with a new count. Motions and yanks never overwrite the stored change, so `.` always repeats the last edit you actually made.
+
+![dot-repeating a change across several lines](doc/asset/dot-repeat.gif)
+<!-- recording pending: make a change, then . . . repeating it down the buffer -->
+
+### visual mode
+
+`v` starts a character-wise selection and `V` a line-wise one, anchored where you press the key; every normal-mode motion resizes it and counts work (`v2ld`, `V2jd`). Operate with `d` / `x`, `y`, `c` / `s`, or the line-forcing `D` / `X` / `Y` / `C` / `S`.
+
+![selecting with v and V then operating on the selection](doc/asset/visual-mode.gif)
+<!-- recording pending: v to extend a selection, d to delete; V to grab lines, y to yank -->
+
+### mode-aware borders
+
+Opt in with `syncBorderColorWithMode` to tint Pi's input border per mode. `"inherit"` keeps Pi's thinking-level signal intact: a mode you configure explicitly is painted even while thinking is active, while an unconfigured mode defers to a non-neutral host border. The mode indicator (`INSERT` / `NORMAL` / `EX`) always shows bottom-right, theme-colored and configurable.
+
+![the input border changing color as the editor switches between insert, normal, and visual](doc/asset/mode-borders.gif)
+<!-- recording pending: border color tracking INSERT/NORMAL/VISUAL, and deferring to a raised thinking level -->
 
 ## install
 
@@ -8,97 +54,11 @@ Modal vim-like editing for Pi's input prompt. Covers the high-frequency 90% comm
 pi install npm:pi-vim
 ```
 
-Restart Pi after install.
-
-## configure
-
-Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`.
-
-Default-equivalent `settings.json`:
-
-```json
-{
-  "piVim": {
-    "clipboardMirror": "all",
-    "exCommand": {
-      "piDispatch": true,
-      "copyInputToClipboard": false
-    },
-    "modeColors": {
-      "insert": "borderMuted",
-      "normal": "borderAccent",
-      "visual": "customMessageLabel",
-      "ex": "warning"
-    },
-    "syncBorderColorWithMode": false
-  }
-}
-```
-
-All keys are optional; omitting `piVim` is equivalent. Project overrides global for non-executing settings; project `modeColors` replaces global `modeColors` whole, with missing modes defaulting above. `modeChange` is intentionally absent from the default and is read only from the global settings file because it executes shell commands.
-
-`clipboardMirror`: `all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`.
-
-`exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [ex mini-mode](#ex-mini-mode)); `false` restores a quit-only ex line. `exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use. `copyInputToClipboard` is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
-
-`syncBorderColorWithMode`: `false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`, and you never lose the signal; a mode you do set is painted even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
-
-The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. For example, `"modeColors": { "insert": "borderMuted" }` restores an always-muted insert border — insert then paints muted even with thinking raised — while every unconfigured mode still tracks the host border.
-
-`modeChange`: user-global shell command to run on every transition into the named mode. Both keys are optional. The command runs asynchronously via the system shell, stdio is discarded, failures are silenced, and a hung command is timed out so editing never blocks or breaks. If mode changes happen while a hook command is still running, pi-vim keeps only the latest pending command. Hooks fire only on actual transitions: not on the initial mode, not on EX entry/exit (EX is a sub-state of normal), and not on no-op `Esc` from normal. Because this is arbitrary shell, project `.pi/settings.json` values are ignored. pi-vim also emits `pi-vim:mode-change` on `pi.events` with `{ mode, previousMode }` for other extensions. Typical use is IME auto-switching via the third-party [`im-select`](https://github.com/daipeihust/im-select) CLI (cross-platform: macOS / Windows / Linux). Install per its README, then run `im-select` with no args to print your current IME id and plug those ids into the global config:
-
-macOS example
-```json
-{
-  "piVim": {
-    "modeChange": {
-      "insert": "im-select im.rime.inputmethod.Squirrel.Hans",
-      "normal": "im-select com.apple.keylayout.ABC"
-    }
-  }
-}
-```
-
-pi-vim does not bundle `im-select` and does not care which tool you use — any shell command works.
-
-### mode colors
-
-`piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use defaults above.
-
-`visual` colors both VISUAL and V-LINE (the footer label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
-
-Usual/safest: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
-
-## wrapping pi-vim
-
-Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). `getMode()` returns `normal`, `insert`, `visual`, or `visual-line`, so a wrapper can tell the two visual sub-modes apart. Inverse order, insert delegates, and generic composition are unsupported.
-
-Smoke:
-
-```bash
-pi -e ./index.ts -e ../pi-image-attachments/index.ts
-pi -e ./index.ts -e ../../../pi-image-attachments/index.ts
-```
-
-Check: insert text; add/paste image path; see `[Image #1]`; submit text+image stripped; switch INSERT/NORMAL.
-
-## contributor setup
-
-Hooks install with `npm install` after cloning. To wire them explicitly:
-
-```bash
-npm run hooks:install
-```
-
-## stats
-
-- **200 commands**: motions, operators, counts, text objects, undo/redo, repeat, visual mode, ex quit
-- **sub-µs word motions** via precomputed boundary cache (~4ms startup, ~150KB memory)
-- **0 dependencies**
+Restart Pi after install. Requires `@earendil-works/pi-tui >= 0.74.0`. With DECSCUSR support the cursor shape follows the mode; otherwise a software cursor remains.
 
 ## 30-second quickstart
 
-Try on multi-line input:
+Try this on multi-line input:
 
 ```text
 Esc        # NORMAL mode
@@ -109,20 +69,7 @@ u          # undo
 2}         # jump two paragraphs forward
 ```
 
-Mode indicator (`INSERT` / `NORMAL` / `EX`) appears bottom-right, theme-colored and configurable.
-
-Requires `@earendil-works/pi-tui >= 0.74.0`. With DECSCUSR support, cursor shape follows mode; otherwise software cursor remains.
-
-## why pi-vim
-
-- Fast modal editing without leaving Pi.
-- Count-aware motions/operators (`2dw`, `3G`, `d2j`, `2}`).
-- REPL-focused defaults; out-of-scope boundaries documented.
-- Clipboard/register behavior is explicit and tested.
-
-Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim parity (visual-block mode, macros, search, extended ex-commands, …).
-
-## common recipes
+Common quick wins:
 
 | goal | keys |
 |---|---|
@@ -138,6 +85,7 @@ Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim par
 | Yank 3 lines | `3yy` |
 | Join 3 lines with spacing | `3J` |
 | Jump 2 paragraphs forward | `2}` |
+| Run `ls` in Pi's shell | `:!ls` |
 | Undo last edit | `u` |
 | Redo last undone edit | `<C-r>` |
 
@@ -164,9 +112,18 @@ Use pi-vim for Vim muscle-memory in Pi prompts. Skip it if you need full Vim par
 
 Optional: move Pi's `app.interrupt` off bare `escape` in `~/.pi/agent/keybindings.json` if it overlaps with Insert→Normal; user config wins.
 
+Insert-mode shortcuts (stay in Insert mode):
+
+| key | action |
+|---|---|
+| `Shift+Alt+A` | Go to end of line |
+| `Shift+Alt+I` | Go to start of line |
+| `Alt+o` | Open line below |
+| `Alt+Shift+O` | Open line above |
+
 #### ex mini-mode
 
-Quit flows, plus a bridge that runs Pi slash commands from the ex line.
+Quit flows, plus a bridge that runs Pi slash commands and shell commands from the ex line.
 
 | key / command | action |
 |---------------|--------|
@@ -205,15 +162,6 @@ Names match exactly and case-sensitively: `:tree` works, `:tre` and `:tree!` do 
 Dispatch clears Pi's prompt buffer, so pi-vim snapshots the composed prompt before the command runs and restores it after; no command reads that buffer as an argument, so the restore is always safe. A dispatch is transparent: the prompt text, the cursor position, undo, redo, and the `.` repeat all survive it untouched. Pi's builtin and extension routes both clear the buffer synchronously before their first `await`, which the restore beats. Set `piVim.exCommand.copyInputToClipboard` to `true` if you want the prompt copied to the OS clipboard before each dispatch as a belt-and-braces fallback, or `piVim.exCommand.piDispatch` to `false` to switch the bridge off entirely.
 
 Discoverability is Pi's `/` palette; ex-line completion of command names is not implemented.
-
-Insert-mode shortcuts (stay in Insert mode):
-
-| key | action |
-|---|---|
-| `Shift+Alt+A` | Go to end of line |
-| `Shift+Alt+I` | Go to start of line |
-| `Alt+o` | Open line below |
-| `Alt+Shift+O` | Open line above |
 
 ---
 
@@ -415,6 +363,76 @@ Visual-mode edits are deliberately **not** dot-repeatable: running one clears th
 
 ---
 
+## settings reference
+
+Settings are read from `~/.pi/agent/settings.json` and project `.pi/settings.json`. All keys are optional; omitting `piVim` is equivalent to the defaults. Project overrides global for non-executing settings; project `modeColors` replaces global `modeColors` whole, with missing modes defaulting below. `modeChange` is intentionally absent from the default and is read only from the global settings file because it executes shell commands.
+
+Default-equivalent `settings.json`:
+
+```json
+{
+  "piVim": {
+    "clipboardMirror": "all",
+    "exCommand": {
+      "piDispatch": true,
+      "copyInputToClipboard": false
+    },
+    "modeColors": {
+      "insert": "borderMuted",
+      "normal": "borderAccent",
+      "visual": "customMessageLabel",
+      "ex": "warning"
+    },
+    "syncBorderColorWithMode": false
+  }
+}
+```
+
+### clipboardMirror
+
+`all` mirrors unnamed writes; `yank` mirrors yanks; `never` keeps writes internal. Non-mirrored writes stay local for `p` / `P`. See [register and clipboard policy](#register-and-clipboard-policy) for the full read/write contract.
+
+### exCommand
+
+`exCommand.piDispatch`: `true` lets the ex line run Pi slash commands (see [pi-command bridge](#pi-command-bridge)); `false` restores a quit-only ex line. `piDispatch` is read from project settings too: the bridge only reaches commands Pi already trusts, so it grants no capability a project file could not already use.
+
+`exCommand.copyInputToClipboard`: `false` leaves the clipboard alone; `true` copies the composed prompt to the OS clipboard before each dispatch, as a safety net if a command clears the prompt. It is read only from the user-global settings file — writing the prompt to the OS clipboard is an exfiltration capability, so a checked-in project file must not be able to turn it on.
+
+### syncBorderColorWithMode
+
+`false` (default) leaves Pi's thinking border untouched; `true` always recolors the border per mode; `"inherit"` recolors per mode, but a mode's default color defers to a non-neutral host border while a mode you configure explicitly is honored over it. So under `"inherit"`, raising thinking to any level or letting another extension set a non-default border keeps that color for every mode you have not set in `modeColors`, and you never lose the signal; a mode you do set is painted even while thinking is on. Detection of the neutral resting border is an exact match against Pi's `thinkingOff` color, not a saturation guess, so it correctly leaves the gray `minimal` level alone too.
+
+The same rule drives both the border and the mode label, and it keys on whether the mode is present in your `modeColors`, not on any particular token. For example, `"modeColors": { "insert": "borderMuted" }` restores an always-muted insert border — insert then paints muted even with thinking raised — while every unconfigured mode still tracks the host border.
+
+### modeColors
+
+`piVim.modeColors` accepts Pi theme foreground tokens. Missing, invalid, or unknown tokens use the defaults above.
+
+`visual` colors both VISUAL and V-LINE (the footer label already tells them apart); its `customMessageLabel` default is the purple/violet token both bundled themes ship, keeping visual distinct from normal's `borderAccent`. Override it like any other mode.
+
+Usual/safest tokens: `accent`, `border`, `borderAccent`, `borderMuted`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `thinkingText`.
+
+### modeChange
+
+`modeChange`: user-global shell command to run on every transition into the named mode. Both keys are optional. The command runs asynchronously via the system shell, stdio is discarded, failures are silenced, and a hung command is timed out so editing never blocks or breaks. If mode changes happen while a hook command is still running, pi-vim keeps only the latest pending command. Hooks fire only on actual transitions: not on the initial mode, not on EX entry/exit (EX is a sub-state of normal), and not on no-op `Esc` from normal. Because this is arbitrary shell, project `.pi/settings.json` values are ignored. pi-vim also emits `pi-vim:mode-change` on `pi.events` with `{ mode, previousMode }` for other extensions.
+
+A typical use is automatic IME switching. Point `modeChange` at any CLI that switches your input method — with no args it prints your current IME id, which you then plug into the config:
+
+```json
+{
+  "piVim": {
+    "modeChange": {
+      "insert": "im-select im.rime.inputmethod.Squirrel.Hans",
+      "normal": "im-select com.apple.keylayout.ABC"
+    }
+  }
+}
+```
+
+pi-vim does not bundle any such tool and does not care which one you use — any shell command works.
+
+---
+
 ## register and clipboard policy
 
 - `piVim.clipboardMirror = "all"` is the default: every unnamed-register write mirrors to the OS clipboard best-effort.
@@ -479,8 +497,25 @@ Explicitly deferred:
 
 ---
 
-## architecture notes
+## wrapping pi-vim
 
-- `index.ts` handles modal keys; `motions.ts` and `text-objects.ts` hold pure range logic; `types.ts` holds shared types/constants; `test/` uses Node's runner.
+Supported: `pi-vim` first, `@jordyvd/pi-image-attachments` second. pi-vim does not wrap previous editors; wrappers decorate in place or forward the CustomEditor surface: lifecycle (`handleInput`, `render`, `invalidate`), text (`getText`, `setText`, `insertTextAtCursor`, `getExpandedText`), callbacks, `actionHandlers`, flags, reads (`getLines`, `getCursor`, `getMode()`). `getMode()` returns `normal`, `insert`, `visual`, or `visual-line`, so a wrapper can tell the two visual sub-modes apart. Inverse order, insert delegates, and generic composition are unsupported.
 
-Run checks with `npm run check`.
+Smoke:
+
+```bash
+pi -e ./index.ts -e ../pi-image-attachments/index.ts
+pi -e ./index.ts -e ../../../pi-image-attachments/index.ts
+```
+
+Check: insert text; add/paste image path; see `[Image #1]`; submit text+image stripped; switch INSERT/NORMAL.
+
+## contributor setup
+
+Hooks install with `npm install` after cloning. To wire them explicitly:
+
+```bash
+npm run hooks:install
+```
+
+Run checks with `npm run check`. `index.ts` handles modal keys; `motions.ts` and `text-objects.ts` hold pure range logic; `types.ts` holds shared types/constants; `test/` uses Node's runner.

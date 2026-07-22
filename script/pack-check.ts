@@ -210,9 +210,18 @@ const THRESHOLDS = {
   // modal-editor + nvim-parity-text-objects tests pin it. Measured packed
   // 54710 B, unpacked 217561 B. Budgets bumped 54000 -> 55000 and 215800 ->
   // 218500, leaving ~290 B / ~939 B headroom. Files stay at 17.
+  //
+  // README rewrite: reorganized the README to lead with a capabilities
+  // pitch and a highlights tour (`:!cmd`, the pi-command bridge, one-`u`
+  // undo, dot-repeat, visual mode, mode-aware borders) plus gif placeholders,
+  // and moved the settings block into a reorganized settings reference. Pure
+  // docs (no code change), but README ships in the package `files` list, so
+  // its net prose growth counts. Measured packed 55500 B, unpacked 220633 B.
+  // Budgets bumped 55000 -> 56000 and 218500 -> 221500, leaving ~500 B /
+  // ~867 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 55000,
-  maxUnpackedSize: 218500,
+  maxSize: 56000,
+  maxUnpackedSize: 221500,
 } as const;
 
 function compareStrings(a: string, b: string): number {
