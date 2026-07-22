@@ -1,3 +1,5 @@
+import { getLineGraphemes } from "./motions.js";
+
 export type TextObjectKind = "i" | "a";
 
 export type TextObjectRange = {
@@ -297,15 +299,37 @@ export function resolveWordTextObjectRange(
   const bounds = findLogicalLineBounds(line, cursor);
   if (bounds.start >= bounds.end) return null;
 
-  // Class of the character at idx within the current logical line, or null
-  // when idx falls outside the line (a boundary).
+  // Classify by grapheme (keyed on the grapheme's first code point), not by a
+  // single UTF-16 code unit. Indexing `line[idx]` splits astral letters — a
+  // lone surrogate half fails the `\p{L}` keyword test and scores as
+  // punctuation (`a𐐀b` becomes three runs) — and detaches a base character
+  // from its trailing combining marks, so an emoji plus variation selector
+  // (`☕️`) breaks into a symbol run and a mark run. nvim keeps each grapheme in
+  // one class run; classifying the grapheme's leading code point and stamping
+  // that class across the grapheme's UTF-16 offsets reproduces that while the
+  // returned ranges stay in UTF-16 offsets.
+  const classByOffset = new Int8Array(line.length).fill(-1);
+  for (const { start: gStart, end: gEnd } of getLineGraphemes(line)) {
+    const codePoint = line.codePointAt(gStart);
+    const ch = codePoint === undefined ? "" : String.fromCodePoint(codePoint);
+    // A newline (only ever its own grapheme) stays a -1 boundary sentinel.
+    if (ch === "" || ch === "\n") continue;
+    const cls: WordCharClass = /\s/.test(ch)
+      ? 0
+      : semanticClass === "WORD"
+        ? 2
+        : isWordChar(ch)
+          ? 2
+          : 1;
+    classByOffset.fill(cls, gStart, gEnd);
+  }
+
+  // Class of the grapheme covering idx within the current logical line, or null
+  // when idx falls outside the line or lands on a newline (a boundary).
   const classAt = (idx: number): WordCharClass | null => {
     if (idx < bounds.start || idx >= bounds.end) return null;
-    const ch = line[idx];
-    if (ch === undefined || ch === "\n") return null;
-    if (/\s/.test(ch)) return 0;
-    if (semanticClass === "WORD") return 2;
-    return isWordChar(ch) ? 2 : 1;
+    const cls = classByOffset[idx];
+    return cls === undefined || cls < 0 ? null : (cls as WordCharClass);
   };
 
   // Extend `end` over the maximal run of the class starting at `end`.

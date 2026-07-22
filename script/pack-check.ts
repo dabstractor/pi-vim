@@ -230,9 +230,17 @@ const THRESHOLDS = {
   // out the default-equivalent maps. Measured packed 56735 B, unpacked 225596 B.
   // Budgets bumped 56000 -> 57300 and 221500 -> 226300, leaving ~565 B / ~704 B
   // headroom. Files stay at 17.
+  //
+  // Post-release text-object parity fixes: text-objects.ts classifies word
+  // classes per grapheme (so astral letters and emoji + variation selectors stay
+  // one class run) and cancels unsatisfiable counted objects; index.ts adds the
+  // EOL-deletion cursor clamp plus the failed-object cursor move. Only shipped
+  // .ts grows — the new parity cases live in test/, which the package excludes.
+  // Measured packed 57943 B, unpacked 228770 B. Budgets bumped 57300 -> 58500
+  // and 226300 -> 229600, leaving ~557 B / ~830 B headroom. Files stay at 17.
   maxFiles: 17,
-  maxSize: 57300,
-  maxUnpackedSize: 226300,
+  maxSize: 58500,
+  maxUnpackedSize: 229600,
 } as const;
 
 function compareStrings(a: string, b: string): number {

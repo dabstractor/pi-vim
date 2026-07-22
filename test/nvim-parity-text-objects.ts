@@ -81,6 +81,21 @@ const INNER_WORD_CLASS_CASES: NvimParityCase[] = [
     keys: ["d", "i", "w"],
   },
   {
+    name: "diw keeps an emoji and its variation selector together",
+    initial: { text: "x☕️y", cursor: { line: 0, col: 1 } },
+    keys: ["d", "i", "w"],
+  },
+  {
+    name: "diw on an astral letter keeps the whole word intact",
+    initial: { text: "a\u{10400}b", cursor: { line: 0, col: 0 } },
+    keys: ["d", "i", "w"],
+  },
+  {
+    name: "diw from the astral letter itself deletes the whole word",
+    initial: { text: "a\u{10400}b", cursor: { line: 0, col: 1 } },
+    keys: ["d", "i", "w"],
+  },
+  {
     name: "2diw spans a word and the following whitespace run",
     initial: { text: "foo bar baz", cursor: { line: 0, col: 1 } },
     keys: ["2", "d", "i", "w"],
